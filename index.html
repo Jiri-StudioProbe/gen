@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Tree</title>
+<style>
+  :root{
+    --bg:#f4f2ee; --panel:#fff; --border:#ddd6c9; --ink:#2b2620; --muted:#8a8276;
+    --accent:#8a5a3b; --accent-ink:#fff; --tile-bg:#fff; --tile-border:#d8cfc0;
+    --danger:#b64b3c; --shadow:0 2px 8px rgba(40,32,20,.08);
+    --row-h:220px; --tile-w:170px;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink); background:var(--bg); overflow:hidden;
+  }
+  #app{display:flex; flex-direction:column; height:100vh;}
+
+  /* ---- Header ---- */
+  header{
+    display:flex; align-items:center; gap:12px; padding:10px 16px;
+    background:var(--panel); border-bottom:1px solid var(--border); z-index:20;
+  }
+  header h1{font-size:16px; margin:0; font-weight:600; letter-spacing:.2px;}
+  header .spacer{flex:1;}
+  header .vault-name{font-size:13px; color:var(--muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  header .status{font-size:12px; color:var(--muted); min-width:70px; text-align:right;}
+  button{
+    font:inherit; cursor:pointer; border:1px solid var(--border); background:var(--panel);
+    color:var(--ink); border-radius:6px; padding:7px 12px; font-size:13px;
+  }
+  button:hover{background:#efe9df;}
+  button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
+  button.primary:hover{filter:brightness(1.08);}
+  button.danger{color:var(--danger); border-color:var(--danger);}
+  button:disabled{opacity:.45; cursor:not-allowed;}
+  button.icon{padding:6px 9px;}
+
+  /* ---- Welcome screen ---- */
+  #welcome{
+    flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:16px;
+    text-align:center; padding:40px;
+  }
+  #welcome h2{font-size:22px; margin:0;}
+  #welcome p{color:var(--muted); max-width:440px; line-height:1.5; margin:0;}
+  #welcome .unsupported{color:var(--danger); font-weight:600;}
+
+  /* ---- Main layout ---- */
+  main{flex:1; position:relative; display:flex; overflow:hidden;}
+  #canvas-viewport{
+    flex:1; position:relative; overflow:hidden; background:
+      radial-gradient(circle, #e2dcce 1px, transparent 1px) 0 0/22px 22px, var(--bg);
+    cursor:grab;
+  }
+  #canvas-viewport.panning{cursor:grabbing;}
+  #canvas-content{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform;}
+  svg#connectors{position:absolute; top:0; left:0; overflow:visible; pointer-events:none;}
+  .person-tile{
+    position:absolute; width:var(--tile-w); background:var(--tile-bg); border:1.5px solid var(--tile-border);
+    border-radius:10px; box-shadow:var(--shadow); padding:10px; cursor:pointer; user-select:none;
+    transition:box-shadow .12s, border-color .12s;
+  }
+  .person-tile:hover{border-color:var(--accent); box-shadow:0 4px 14px rgba(40,32,20,.14);}
+  .person-tile.dragging{opacity:.85; z-index:50; cursor:grabbing;}
+  .person-tile .photo{
+    width:100%; height:90px; border-radius:7px; background:#eee2d2 center/cover no-repeat;
+    display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:24px; margin-bottom:8px;
+  }
+  .person-tile .name{font-size:13.5px; font-weight:600; line-height:1.25; word-break:break-word;}
+  .person-tile .years{font-size:11.5px; color:var(--muted); margin-top:2px;}
+  .person-tile .badge{
+    display:inline-block; font-size:10px; margin-top:5px; padding:1px 6px; border-radius:10px;
+    background:#efe6d6; color:var(--accent);
+  }
+
+  #zoom-controls{position:absolute; right:14px; bottom:14px; display:flex; flex-direction:column; gap:6px; z-index:15;}
+  #zoom-controls button{width:34px; height:34px; padding:0; font-size:16px;}
+
+  /* ---- Add menu popover ---- */
+  #add-menu{
+    position:absolute; z-index:60; background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; box-shadow:var(--shadow); min-width:190px; padding:6px; display:none;
+  }
+  #add-menu button{display:block; width:100%; text-align:left; border:none; background:none; padding:8px 10px; border-radius:6px;}
+  #add-menu button:hover{background:#efe9df;}
+  #add-menu .sep{height:1px; background:var(--border); margin:5px 2px;}
+
+  /* ---- Detail panel ---- */
+  #detail-panel{
+    width:400px; max-width:92vw; background:var(--panel); border-left:1px solid var(--border);
+    overflow-y:auto; display:flex; flex-direction:column; flex-shrink:0;
+  }
+  #detail-panel[hidden]{display:none;}
+  .detail-head{display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--border);}
+  .detail-head h2{font-size:16px; margin:0; flex:1;}
+  .detail-body{padding:14px 16px; display:flex; flex-direction:column; gap:14px;}
+  .field{display:flex; flex-direction:column; gap:4px;}
+  .field label{font-size:11.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:600;}
+  .field input[type=text], .field input[type=date], .field select, .field textarea{
+    font:inherit; padding:7px 9px; border:1px solid var(--border); border-radius:6px; background:#fffdfa;
+  }
+  .field textarea{resize:vertical; min-height:110px; font-family:inherit;}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+  fieldset{border:1px solid var(--border); border-radius:8px; padding:10px; margin:0;}
+  legend{font-size:12px; font-weight:600; color:var(--muted); padding:0 4px;}
+  .rel-list{display:flex; flex-direction:column; gap:6px;}
+  .rel-item{display:flex; align-items:center; gap:8px; font-size:13px; padding:6px 8px; background:#faf7f1; border-radius:6px;}
+  .rel-item .name{flex:1; cursor:pointer;}
+  .rel-item .name:hover{text-decoration:underline;}
+  .rel-item .tag{font-size:10.5px; color:var(--muted);}
+  .spouse-card{border:1px solid var(--border); border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:6px;}
+  .photo-upload{display:flex; align-items:center; gap:10px;}
+  .photo-upload .preview{width:64px; height:64px; border-radius:8px; background:#eee2d2 center/cover no-repeat; flex-shrink:0;}
+  .extra-fields{display:flex; flex-direction:column; gap:6px;}
+  .extra-field-row{display:flex; gap:6px;}
+  .extra-field-row input{flex:1;}
+  .muted{color:var(--muted); font-size:12.5px;}
+  hr.sep{border:none; border-top:1px solid var(--border); margin:2px 0;}
+
+  /* ---- Modal ---- */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(30,25,18,.4); display:flex; align-items:center; justify-content:center; z-index:100;
+  }
+  .modal{background:var(--panel); border-radius:10px; padding:18px; width:420px; max-width:92vw; box-shadow:0 12px 40px rgba(0,0,0,.25); display:flex; flex-direction:column; gap:12px;}
+  .modal h3{margin:0; font-size:15px;}
+  .modal .actions{display:flex; justify-content:flex-end; gap:8px; margin-top:4px;}
+
+  /* ---- Crop modal ---- */
+  .crop-stage{position:relative; width:340px; height:260px; overflow:hidden; border-radius:8px; background:#111; margin:0 auto; touch-action:none;}
+  .crop-stage img{position:absolute; top:0; left:0; user-select:none; -webkit-user-drag:none; cursor:grab;}
+  .crop-frame{position:absolute; border:2px solid #fff; box-shadow:0 0 0 2000px rgba(0,0,0,.45); pointer-events:none;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🌳 Family Tree</h1>
+    <span class="vault-name" id="vault-name"></span>
+    <div class="spacer"></div>
+    <span class="status" id="status-text"></span>
+    <button id="btn-new-person" style="display:none;">+ New person</button>
+    <button id="btn-open-vault">Open folder…</button>
+  </header>
+
+  <div id="welcome">
+    <h2>Open a folder to begin</h2>
+    <p>Family Tree stores your data as plain Markdown files in a folder you choose &mdash; the same folder can be opened as an Obsidian vault. Nothing leaves your machine.</p>
+    <p id="unsupported-msg" class="unsupported" style="display:none;">Your browser doesn't support the File System Access API. Please use desktop Chrome or Edge.</p>
+    <button class="primary" id="btn-open-vault-2">Open folder…</button>
+  </div>
+
+  <main style="display:none;" id="main-area">
+    <div id="canvas-viewport">
+      <div id="canvas-content">
+        <svg id="connectors"></svg>
+      </div>
+      <div id="zoom-controls">
+        <button id="zoom-in" title="Zoom in">+</button>
+        <button id="zoom-reset" title="Fit to view">⤢</button>
+        <button id="zoom-out" title="Zoom out">−</button>
+      </div>
+    </div>
+    <aside id="detail-panel" hidden></aside>
+  </main>
+
+  <div id="add-menu"></div>
+  <div id="modal-root"></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =========================================================================
+   Constants
+   ========================================================================= */
+const PERSON_FIELD_ORDER = ["id","name","gender","dob","dob_precision","birthplace",
+  "dod","deathplace","occupation","photo","parents","children","spouses"];
+const CORE_FIELD_SET = new Set(PERSON_FIELD_ORDER);
+const SPOUSE_STATUSES = ["married","divorced","widowed","partnered"];
+const DATE_PRECISIONS = ["exact","approx","unknown"];
+const TILE_W = 170, TILE_GAP = 34, ROW_H = 220, CLUSTER_GAP = 46;
+
+/* =========================================================================
+   YAML frontmatter parser / serializer (hand-written, tailored subset)
+   Supports: scalars, lists of scalars, lists of flat maps (one level).
+   Enough to round-trip everything this app writes, and to tolerate
+   arbitrary ad-hoc scalar/list keys a user adds by hand.
+   ========================================================================= */
+
+function stripQuotes(s){
+  s = s.trim();
+  if((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))){
+    return s.slice(1,-1).replace(/\\"/g,'"');
+  }
+  return s;
+}
+
+function parseScalar(s){
+  s = s.trim();
+  if(s === '' || s === '~' || s === 'null') return null;
+  if(s === 'true') return true;
+  if(s === 'false') return false;
+  if(/^-?\d+$/.test(s)) return parseInt(s,10);
+  if(/^-?\d+\.\d+$/.test(s)) return parseFloat(s);
+  return stripQuotes(s);
+}
+
+function yamlScalar(v){
+  if(v === null || v === undefined) return '';
+  if(typeof v === 'number' || typeof v === 'boolean') return String(v);
+  const s = String(v);
+  if(s === '') return '';
+  if(/^\s|\s$/.test(s) || /[:#\[\]{}|>*&!%@`'"]/.test(s) ||
+     /^(true|false|null|~)$/i.test(s) || /^-?\d+(\.\d+)?$/.test(s)){
+    return `"${s.replace(/"/g,'\\"')}"`;
+  }
+  return s;
+}
+
+function indentOf(line){
+  const m = line.match(/^( *)/);
+  return m[1].length;
+}
+
+function findColon(s){
+  let inQuote = null;
+  for(let i=0;i<s.length;i++){
+    const c = s[i];
+    if(inQuote){ if(c === inQuote) inQuote = null; continue; }
+    if(c === '"' || c === "'"){ inQuote = c; continue; }
+    if(c === ':' && (i === s.length-1 || s[i+1] === ' ')) return i;
+  }
+  return s.indexOf(':');
+}
+
+function parseYAMLBlock(text){
+  const raw = text.split(/\r?\n/);
+  const lines = [];
+  for(const line of raw){
+    const t = line.trim();
+    if(t === '' || t.startsWith('#')) continue;
+    lines.push(line);
+  }
+  let i = 0;
+
+  function parseBlock(baseIndent){
+    const obj = {};
+    while(i < lines.length){
+      const line = lines[i];
+      const ind = indentOf(line);
+      if(ind < baseIndent) break;
+      if(ind > baseIndent){ i++; continue; }
+      const content = line.slice(ind);
+      const ci = findColon(content);
+      if(ci < 0){ i++; continue; }
+      const key = content.slice(0,ci).trim();
+      const rest = content.slice(ci+1).trim();
+      i++;
+      if(rest === ''){
+        if(i < lines.length && indentOf(lines[i]) > baseIndent && lines[i].trim().startsWith('-')){
+          obj[key] = parseList(indentOf(lines[i]));
+        } else if(i < lines.length && indentOf(lines[i]) > baseIndent){
+          obj[key] = parseBlock(indentOf(lines[i]));
+        } else {
+          obj[key] = null;
+        }
+      } else {
+        obj[key] = parseScalar(rest);
+      }
+    }
+    return obj;
+  }
+
+  function parseList(baseIndent){
+    const arr = [];
+    while(i < lines.length){
+      const line = lines[i];
+      const ind = indentOf(line);
+      if(ind < baseIndent) break;
+      if(ind > baseIndent){ i++; continue; }
+      const content = line.slice(ind);
+      if(!content.startsWith('-')) break;
+      const afterDash = content.slice(1).trim();
+      i++;
+      if(afterDash === ''){
+        if(i < lines.length && indentOf(lines[i]) > baseIndent){
+          arr.push(parseBlock(indentOf(lines[i])));
+        } else {
+          arr.push(null);
+        }
+        continue;
+      }
+      const ci = findColon(afterDash);
+      if(ci < 0){
+        arr.push(parseScalar(afterDash));
+        continue;
+      }
+      const item = {};
+      const k0 = afterDash.slice(0,ci).trim();
+      const v0 = afterDash.slice(ci+1).trim();
+      item[k0] = v0 === '' ? null : parseScalar(v0);
+      const dashPos = content.indexOf(afterDash);
+      const itemBodyIndent = ind + dashPos;
+      while(i < lines.length){
+        const l2 = lines[i];
+        const ind2 = indentOf(l2);
+        if(ind2 !== itemBodyIndent) break;
+        const c2 = l2.slice(ind2);
+        if(c2.startsWith('-')) break;
+        const ci2 = findColon(c2);
+        if(ci2 < 0) break;
+        const k2 = c2.slice(0,ci2).trim();
+        const v2 = c2.slice(ci2+1).trim();
+        item[k2] = v2 === '' ? null : parseScalar(v2);
+        i++;
+      }
+      arr.push(item);
+    }
+    return arr;
+  }
+
+  return parseBlock(0);
+}
+
+function parseFrontmatter(raw){
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if(!m) return { frontmatter:{}, body: raw };
+  return { frontmatter: parseYAMLBlock(m[1]), body: m[2] };
+}
+
+function serializeFrontmatter(obj, keyOrder){
+  const keys = [...keyOrder.filter(k=>k in obj), ...Object.keys(obj).filter(k=>!keyOrder.includes(k))];
+  const lines = [];
+  for(const key of keys){
+    const val = obj[key];
+    if(Array.isArray(val)){
+      if(val.length === 0){ lines.push(`${key}: []`); continue; }
+      lines.push(`${key}:`);
+      for(const item of val){
+        if(item && typeof item === 'object'){
+          const itemKeys = Object.keys(item);
+          itemKeys.forEach((ik,idx)=>{
+            const prefix = idx === 0 ? '  - ' : '    ';
+            lines.push(`${prefix}${ik}: ${yamlScalar(item[ik])}`);
+          });
+        } else {
+          lines.push(`  - ${yamlScalar(item)}`);
+        }
+      }
+    } else if(val && typeof val === 'object'){
+      lines.push(`${key}:`);
+      for(const [k2,v2] of Object.entries(val)) lines.push(`  ${k2}: ${yamlScalar(v2)}`);
+    } else {
+      lines.push(`${key}: ${yamlScalar(val)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function serializePersonFile(frontmatter, body){
+  const fm = serializeFrontmatter(frontmatter, PERSON_FIELD_ORDER);
+  return `---\n${fm}\n---\n${body || ''}`;
+}
+
+/* =========================================================================
+   IDs
+   ========================================================================= */
+
+function slugify(name){
+  return (name||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'person';
+}
+
+function generateId(name, dob, existingIds){
+  const base = slugify(name);
+  const year = dob ? String(dob).slice(0,4) : null;
+  const candidate = year ? `${base}-${year}` : base;
+  if(!existingIds.has(candidate)) return candidate;
+  let suffix, attempt;
+  do {
+    suffix = Math.random().toString(36).slice(2,6);
+    attempt = `${candidate}-${suffix}`;
+  } while(existingIds.has(attempt));
+  return attempt;
+}
+
+/* =========================================================================
+   Relationships index <-> mirrored frontmatter
+   index shape: { parentChild:[{parent,child,type}], spousePairs:[{id,a,b,status,
+     start_date,start_date_precision,end_date,end_date_precision,order_a,order_b}] }
+   ========================================================================= */
+
+function newRelId(){ return 'r_' + Math.random().toString(36).slice(2,10); }
+
+function emptyIndex(){ return { parentChild: [], spousePairs: [] }; }
+
+function computeMirrors(index, peopleMap){
+  const parentsOf = new Map(), childrenOf = new Map();
+  for(const pc of index.parentChild){
+    if(!parentsOf.has(pc.child)) parentsOf.set(pc.child, []);
+    parentsOf.get(pc.child).push(pc.parent);
+    if(!childrenOf.has(pc.parent)) childrenOf.set(pc.parent, []);
+    childrenOf.get(pc.parent).push(pc.child);
+  }
+  const spousesOf = new Map();
+  const addSpouseMirror = (ownerId, partnerId, order, sp) => {
+    if(!spousesOf.has(ownerId)) spousesOf.set(ownerId, []);
+    spousesOf.get(ownerId).push({
+      partner_id: partnerId, status: sp.status,
+      start_date: sp.start_date, start_date_precision: sp.start_date_precision,
+      end_date: sp.end_date, end_date_precision: sp.end_date_precision,
+      order: order != null ? order : null
+    });
+  };
+  for(const sp of index.spousePairs){
+    addSpouseMirror(sp.a, sp.b, sp.order_a, sp);
+    addSpouseMirror(sp.b, sp.a, sp.order_b, sp);
+  }
+  for(const [id, person] of peopleMap){
+    person.frontmatter.parents = parentsOf.get(id) || [];
+    person.frontmatter.children = childrenOf.get(id) || [];
+    const mine = spousesOf.get(id) || [];
+    person.frontmatter.spouses = resolveSpouseOrder(mine).map(s => ({
+      partner_id: s.partner_id, status: s.status, start_date: s.start_date,
+      start_date_precision: s.start_date_precision, end_date: s.end_date,
+      end_date_precision: s.end_date_precision, order: s.displayOrder
+    }));
+  }
+}
+
+function resolveSpouseOrder(list){
+  const used = new Set(list.filter(s=>s.order != null).map(s=>s.order));
+  const withoutOrder = list.filter(s=>s.order == null)
+    .slice().sort((a,b)=> (a.start_date||'9999-99-99') < (b.start_date||'9999-99-99') ? -1 : 1);
+  const assigned = new Map();
+  let next = 1;
+  for(const s of withoutOrder){
+    while(used.has(next)) next++;
+    assigned.set(s, next); used.add(next);
+  }
+  return list.map(s => ({ ...s, displayOrder: s.order != null ? s.order : assigned.get(s) }));
+}
+
+function rebuildIndexFromPeople(peopleMap){
+  const index = emptyIndex();
+  const seenPC = new Set();
+  for(const [id, person] of peopleMap){
+    for(const parentId of (person.frontmatter.parents||[])){
+      const key = parentId+'>'+id;
+      if(seenPC.has(key)) continue;
+      seenPC.add(key);
+      index.parentChild.push({ parent: parentId, child: id, type: 'biological' });
+    }
+  }
+  const seenPairs = new Map(); // sorted-pair+start_date -> entry
+  for(const [id, person] of peopleMap){
+    for(const sp of (person.frontmatter.spouses||[])){
+      if(!sp || !sp.partner_id) continue;
+      const [a,b] = [id, sp.partner_id].sort();
+      const key = a+'|'+b+'|'+(sp.start_date||'');
+      if(seenPairs.has(key)) continue;
+      const entry = {
+        id: newRelId(), a, b, status: sp.status || 'married',
+        start_date: sp.start_date || null, start_date_precision: sp.start_date_precision || 'unknown',
+        end_date: sp.end_date || null, end_date_precision: sp.end_date_precision || null,
+        order_a: id === a ? sp.order : null, order_b: id === b ? sp.order : null
+      };
+      seenPairs.set(key, entry);
+      index.spousePairs.push(entry);
+    }
+  }
+  return index;
+}
+
+function computeSiblings(personId, index){
+  const myParents = new Set(index.parentChild.filter(pc=>pc.child===personId).map(pc=>pc.parent));
+  const stepParents = new Set();
+  for(const p of myParents){
+    for(const sp of index.spousePairs){
+      if(sp.a === p) stepParents.add(sp.b);
+      if(sp.b === p) stepParents.add(sp.a);
+    }
+  }
+  const shared = new Map();
+  for(const pc of index.parentChild){
+    if(pc.child === personId || !myParents.has(pc.parent)) continue;
+    if(!shared.has(pc.child)) shared.set(pc.child, new Set());
+    shared.get(pc.child).add(pc.parent);
+  }
+  const result = [];
+  for(const [sibId, parents] of shared){
+    result.push({ id: sibId, type: parents.size > 1 ? 'full' : 'half' });
+  }
+  for(const pc of index.parentChild){
+    if(pc.child === personId) continue;
+    if(!stepParents.has(pc.parent) || myParents.has(pc.parent)) continue;
+    if(result.find(r=>r.id===pc.child)) continue;
+    result.push({ id: pc.child, type: 'step' });
+  }
+  return result;
+}
+
+/* =========================================================================
+   Layout: generation-based layered layout
+   ========================================================================= */
+
+function computeGenerations(ids, parentChild, spousePairs){
+  const childrenOf = new Map(), parentsOf = new Map();
+  for(const pc of parentChild){
+    if(!parentsOf.has(pc.child)) parentsOf.set(pc.child, []);
+    parentsOf.get(pc.child).push(pc.parent);
+    if(!childrenOf.has(pc.parent)) childrenOf.set(pc.parent, []);
+    childrenOf.get(pc.parent).push(pc.child);
+  }
+  const gen = new Map();
+  const roots = ids.filter(id => !(parentsOf.get(id)||[]).length);
+  const queue = [];
+  for(const id of roots){ gen.set(id,0); queue.push(id); }
+  while(queue.length){
+    const id = queue.shift();
+    const g = gen.get(id);
+    for(const c of (childrenOf.get(id)||[])){
+      if(!gen.has(c) || gen.get(c) < g+1){ gen.set(c, g+1); queue.push(c); }
+    }
+  }
+  for(const id of ids) if(!gen.has(id)) gen.set(id, 0);
+
+  // A spouse with no parents recorded of their own has no real BFS-derived
+  // generation (per Add-person flow: partners are often added before their
+  // own parents are mapped) — pull them onto their partner's row so couples
+  // stay grouped side by side, per the PRD's layout requirement.
+  const hasParents = id => (parentsOf.get(id)||[]).length > 0;
+  if(spousePairs){
+    for(let pass=0; pass<5; pass++){
+      let changed = false;
+      for(const sp of spousePairs){
+        if(!gen.has(sp.a) || !gen.has(sp.b)) continue;
+        if(!hasParents(sp.a) && hasParents(sp.b) && gen.get(sp.a) !== gen.get(sp.b)){
+          gen.set(sp.a, gen.get(sp.b)); changed = true;
+        } else if(!hasParents(sp.b) && hasParents(sp.a) && gen.get(sp.b) !== gen.get(sp.a)){
+          gen.set(sp.b, gen.get(sp.a)); changed = true;
+        }
+      }
+      if(!changed) break;
+    }
+  }
+  return gen;
+}
+
+function computeLayout(ids, index, overrides){
+  overrides = overrides || {};
+  const gen = computeGenerations(ids, index.parentChild, index.spousePairs);
+  const parent = new Map(ids.map(id=>[id,id]));
+  function find(x){ while(parent.get(x)!==x) x = parent.get(x); return x; }
+  function union(a,b){ const ra=find(a), rb=find(b); if(ra!==rb) parent.set(ra,rb); }
+  for(const sp of index.spousePairs){
+    if(ids.includes(sp.a) && ids.includes(sp.b) && gen.get(sp.a) === gen.get(sp.b)) union(sp.a, sp.b);
+  }
+  const rows = new Map();
+  for(const id of ids){
+    const g = gen.get(id);
+    if(!rows.has(g)) rows.set(g, []);
+    rows.get(g).push(id);
+  }
+  const positions = new Map();
+  const sortedGens = [...rows.keys()].sort((a,b)=>a-b);
+  for(const g of sortedGens){
+    const rowIds = rows.get(g).slice().sort();
+    const clusters = new Map();
+    for(const id of rowIds){
+      const r = find(id);
+      if(!clusters.has(r)) clusters.set(r, []);
+      clusters.get(r).push(id);
+    }
+    let x = 0;
+    for(const [,members] of clusters){
+      for(const id of members){
+        positions.set(id, overrides[id] ? { ...overrides[id] } : { x, y: g*ROW_H });
+        x += TILE_W + TILE_GAP;
+      }
+      x += CLUSTER_GAP;
+    }
+  }
+  return { positions, gen };
+}
+
+/* =========================================================================
+   Storage: File System Access API
+   ========================================================================= */
+
+const Storage = {
+  root: null,
+  async pickFolder(){
+    const handle = await window.showDirectoryPicker();
+    this.root = handle;
+    await this.ensureStructure();
+    return handle;
+  },
+  async ensureStructure(){
+    await this.root.getDirectoryHandle('people', { create:true });
+    await this.root.getDirectoryHandle('photos', { create:true });
+    await this.root.getDirectoryHandle('_index', { create:true });
+  },
+  async listPeopleFiles(){
+    const dir = await this.root.getDirectoryHandle('people', { create:true });
+    const files = [];
+    for await (const [name, handle] of dir.entries()){
+      if(handle.kind === 'file' && name.endsWith('.md')) files.push(name);
+    }
+    return files;
+  },
+  async readPersonFile(filename){
+    const dir = await this.root.getDirectoryHandle('people');
+    const fh = await dir.getFileHandle(filename);
+    const file = await fh.getFile();
+    return await file.text();
+  },
+  async writePersonFile(filename, content){
+    const dir = await this.root.getDirectoryHandle('people', { create:true });
+    const fh = await dir.getFileHandle(filename, { create:true });
+    const w = await fh.createWritable();
+    await w.write(content);
+    await w.close();
+  },
+  async readJSON(dirName, filename){
+    try{
+      const dir = await this.root.getDirectoryHandle(dirName);
+      const fh = await dir.getFileHandle(filename);
+      const file = await fh.getFile();
+      return JSON.parse(await file.text());
+    } catch(e){ return null; }
+  },
+  async writeJSON(dirName, filename, obj){
+    const dir = await this.root.getDirectoryHandle(dirName, { create:true });
+    const fh = await dir.getFileHandle(filename, { create:true });
+    const w = await fh.createWritable();
+    await w.write(JSON.stringify(obj, null, 2));
+    await w.close();
+  },
+  async writePhoto(filename, blob){
+    const dir = await this.root.getDirectoryHandle('photos', { create:true });
+    const fh = await dir.getFileHandle(filename, { create:true });
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+  },
+  async readPhotoURL(filename){
+    try{
+      const dir = await this.root.getDirectoryHandle('photos');
+      const fh = await dir.getFileHandle(filename);
+      const file = await fh.getFile();
+      return URL.createObjectURL(file);
+    } catch(e){ return null; }
+  }
+};
+
+/* =========================================================================
+   App state
+   ========================================================================= */
+
+const state = {
+  people: new Map(),      // id -> { filename, frontmatter, body }
+  index: emptyIndex(),
+  layoutOverrides: {},
+  positions: new Map(),
+  photoUrls: new Map(),   // id -> object URL
+  view: { x: 80, y: 40, scale: 1 },
+  selectedId: null,
+};
+
+function setStatus(text){ document.getElementById('status-text').textContent = text; }
+
+async function loadVault(){
+  setStatus('Loading…');
+  state.people.clear();
+  const filenames = await Storage.listPeopleFiles();
+  for(const filename of filenames){
+    const raw = await Storage.readPersonFile(filename);
+    const { frontmatter, body } = parseFrontmatter(raw);
+    if(!frontmatter.id) frontmatter.id = filename.replace(/\.md$/, '');
+    state.people.set(frontmatter.id, { filename, frontmatter, body });
+  }
+  let index = await Storage.readJSON('_index', 'relationships.json');
+  if(!index || !index.parentChild){
+    index = rebuildIndexFromPeople(state.people);
+    await Storage.writeJSON('_index', 'relationships.json', index);
+  }
+  state.index = index;
+  const layout = await Storage.readJSON('_index', 'layout.json');
+  state.layoutOverrides = layout || {};
+  computeMirrors(state.index, state.people);
+  await loadPhotos();
+  setStatus('Ready');
+  renderAll();
+}
+
+async function loadPhotos(){
+  for(const url of state.photoUrls.values()) URL.revokeObjectURL(url);
+  state.photoUrls.clear();
+  for(const [id, person] of state.people){
+    if(person.frontmatter.photo){
+      const filename = person.frontmatter.photo.split('/').pop();
+      const url = await Storage.readPhotoURL(filename);
+      if(url) state.photoUrls.set(id, url);
+    }
+  }
+}
+
+async function persistPerson(id){
+  const person = state.people.get(id);
+  const content = serializePersonFile(person.frontmatter, person.body);
+  await Storage.writePersonFile(person.filename, content);
+}
+
+async function persistIndex(){
+  await Storage.writeJSON('_index', 'relationships.json', state.index);
+}
+
+async function persistLayout(){
+  await Storage.writeJSON('_index', 'layout.json', state.layoutOverrides);
+}
+
+async function saveAll(affectedIds){
+  setStatus('Saving…');
+  computeMirrors(state.index, state.people);
+  await persistIndex();
+  for(const id of affectedIds || state.people.keys()) await persistPerson(id);
+  setStatus('Saved');
+  renderAll();
+}
+
+/* =========================================================================
+   Mutations
+   ========================================================================= */
+
+function createPerson(fields){
+  const existingIds = new Set(state.people.keys());
+  const id = generateId(fields.name, fields.dob, existingIds);
+  const frontmatter = {
+    id, name: fields.name || '', gender: fields.gender || '',
+    dob: fields.dob || null, dob_precision: fields.dob ? 'exact' : 'unknown',
+    birthplace: '', dod: null, deathplace: '', occupation: '', photo: null,
+    parents: [], children: [], spouses: []
+  };
+  state.people.set(id, { filename: id + '.md', frontmatter, body: '' });
+  return id;
+}
+
+function addParentChild(parentId, childId, type){
+  type = type || 'biological';
+  const exists = state.index.parentChild.some(pc=>pc.parent===parentId && pc.child===childId);
+  if(!exists) state.index.parentChild.push({ parent: parentId, child: childId, type });
+}
+
+function addSpousePair(aId, bId, opts){
+  opts = opts || {};
+  state.index.spousePairs.push({
+    id: newRelId(), a: aId, b: bId, status: opts.status || 'married',
+    start_date: opts.start_date || null, start_date_precision: opts.start_date_precision || 'unknown',
+    end_date: opts.end_date || null, end_date_precision: opts.end_date_precision || null,
+    order_a: null, order_b: null
+  });
+}
+
+function currentSpouseOf(personId){
+  const p = state.people.get(personId);
+  const spouses = (p.frontmatter.spouses || []);
+  const active = spouses.find(s => s.status === 'married' || s.status === 'partnered');
+  return active ? active.partner_id : null;
+}
+
+/* =========================================================================
+   Rendering
+   ========================================================================= */
+
+function personLabel(person){
+  const dob = person.frontmatter.dob ? String(person.frontmatter.dob).slice(0,4) : '?';
+  const dod = person.frontmatter.dod ? String(person.frontmatter.dod).slice(0,4) : (person.frontmatter.dod === null && person.frontmatter.dod !== undefined ? '' : '');
+  return `${dob}${person.frontmatter.dod ? ' – ' + dod : (person.frontmatter.dod === undefined ? '' : '')}`;
+}
+
+function applyTransform(){
+  const el = document.getElementById('canvas-content');
+  el.style.transform = `translate(${state.view.x}px, ${state.view.y}px) scale(${state.view.scale})`;
+}
+
+function renderAll(){
+  const ids = [...state.people.keys()];
+  const { positions } = computeLayout(ids, state.index, state.layoutOverrides);
+  state.positions = positions;
+  renderTiles();
+  renderConnectors();
+  applyTransform();
+  renderDetailPanel();
+  document.getElementById('vault-name').textContent = Storage.root ? Storage.root.name : '';
+}
+
+function renderTiles(){
+  const container = document.getElementById('canvas-content');
+  container.querySelectorAll('.person-tile').forEach(el=>el.remove());
+  for(const [id, person] of state.people){
+    const pos = state.positions.get(id) || { x:0, y:0 };
+    const tile = document.createElement('div');
+    tile.className = 'person-tile';
+    tile.dataset.id = id;
+    tile.style.left = pos.x + 'px';
+    tile.style.top = pos.y + 'px';
+    const photoUrl = state.photoUrls.get(id);
+    const years = personLabel(person);
+    tile.innerHTML = `
+      <div class="photo" style="${photoUrl ? `background-image:url('${photoUrl}')` : ''}">${photoUrl ? '' : '👤'}</div>
+      <div class="name">${escapeHtml(person.frontmatter.name || '(unnamed)')}</div>
+      <div class="years">${years}</div>
+      ${person.frontmatter.dod ? '<span class="badge">deceased</span>' : ''}
+    `;
+    tile.addEventListener('mousedown', onTileMouseDown);
+    tile.addEventListener('click', onTileClick);
+    container.appendChild(tile);
+  }
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderConnectors(){
+  const svg = document.getElementById('connectors');
+  svg.innerHTML = '';
+  let maxX = 0, maxY = 0;
+  for(const pos of state.positions.values()){ maxX = Math.max(maxX, pos.x+TILE_W+200); maxY = Math.max(maxY, pos.y+300); }
+  svg.setAttribute('width', maxX);
+  svg.setAttribute('height', maxY);
+
+  const center = id => {
+    const pos = state.positions.get(id);
+    if(!pos) return null;
+    return { x: pos.x + TILE_W/2, y: pos.y + 100 };
+  };
+
+  const drawn = new Set();
+  for(const sp of state.index.spousePairs){
+    if(!state.positions.has(sp.a) || !state.positions.has(sp.b)) continue;
+    const key = [sp.a,sp.b].sort().join('|');
+    if(drawn.has(key)) continue;
+    drawn.add(key);
+    const ca = center(sp.a), cb = center(sp.b);
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', ca.x); line.setAttribute('y1', ca.y - 55);
+    line.setAttribute('x2', cb.x); line.setAttribute('y2', cb.y - 55);
+    line.setAttribute('stroke', sp.status === 'divorced' ? '#c69a7b' : '#a98a63');
+    line.setAttribute('stroke-width', '2');
+    if(sp.status === 'divorced') line.setAttribute('stroke-dasharray', '4,3');
+    svg.appendChild(line);
+  }
+
+  const byParentSet = new Map();
+  for(const pc of state.index.parentChild){
+    if(!byParentSet.has(pc.child)) byParentSet.set(pc.child, []);
+    byParentSet.get(pc.child).push(pc.parent);
+  }
+  for(const [child, parents] of byParentSet){
+    if(!state.positions.has(child)) continue;
+    const validParents = parents.filter(p=>state.positions.has(p));
+    if(!validParents.length) continue;
+    const cc = center(child);
+    const parentPts = validParents.map(center);
+    const midX = parentPts.reduce((s,p)=>s+p.x,0)/parentPts.length;
+    const midY = parentPts[0].y - 55;
+    for(const pp of parentPts){
+      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+      path.setAttribute('d', `M ${pp.x} ${pp.y-55} L ${pp.x} ${midY+30} L ${midX} ${midY+30}`);
+      path.setAttribute('fill','none'); path.setAttribute('stroke','#bdb093'); path.setAttribute('stroke-width','1.5');
+      svg.appendChild(path);
+    }
+    const dline = document.createElementNS('http://www.w3.org/2000/svg','path');
+    dline.setAttribute('d', `M ${midX} ${midY+30} L ${midX} ${cc.y-100} L ${cc.x} ${cc.y-100}`);
+    dline.setAttribute('fill','none'); dline.setAttribute('stroke','#bdb093'); dline.setAttribute('stroke-width','1.5');
+    svg.appendChild(dline);
+  }
+}
+
+/* =========================================================================
+   Canvas interaction: pan / zoom / drag
+   ========================================================================= */
+
+let panState = null;
+let dragState = null;
+
+function initCanvasInteraction(){
+  const viewport = document.getElementById('canvas-viewport');
+  viewport.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const delta = -e.deltaY * 0.0012;
+    const newScale = Math.min(2.5, Math.max(0.25, state.view.scale * (1+delta)));
+    const rect = viewport.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    const wx = (cx - state.view.x) / state.view.scale;
+    const wy = (cy - state.view.y) / state.view.scale;
+    state.view.scale = newScale;
+    state.view.x = cx - wx*newScale;
+    state.view.y = cy - wy*newScale;
+    applyTransform();
+  }, { passive:false });
+
+  viewport.addEventListener('mousedown', e=>{
+    if(e.target.closest('.person-tile')) return;
+    panState = { startX:e.clientX, startY:e.clientY, ox:state.view.x, oy:state.view.y };
+    viewport.classList.add('panning');
+    closeAddMenu();
+  });
+  window.addEventListener('mousemove', e=>{
+    if(panState){
+      state.view.x = panState.ox + (e.clientX - panState.startX);
+      state.view.y = panState.oy + (e.clientY - panState.startY);
+      applyTransform();
+    }
+    if(dragState){
+      const dx = (e.clientX - dragState.startX) / state.view.scale;
+      const dy = (e.clientY - dragState.startY) / state.view.scale;
+      dragState.el.style.left = (dragState.ox + dx) + 'px';
+      dragState.el.style.top = (dragState.oy + dy) + 'px';
+      dragState.moved = true;
+    }
+  });
+  window.addEventListener('mouseup', async ()=>{
+    if(panState){ panState = null; viewport.classList.remove('panning'); }
+    if(dragState){
+      const { id, el, moved } = dragState;
+      dragState = null;
+      el.classList.remove('dragging');
+      if(moved){
+        const x = parseFloat(el.style.left), y = parseFloat(el.style.top);
+        state.layoutOverrides[id] = { x, y };
+        state.positions.set(id, { x, y });
+        renderConnectors();
+        await persistLayout();
+      }
+    }
+  });
+
+  document.getElementById('zoom-in').addEventListener('click', ()=>{ state.view.scale = Math.min(2.5, state.view.scale*1.2); applyTransform(); });
+  document.getElementById('zoom-out').addEventListener('click', ()=>{ state.view.scale = Math.max(0.25, state.view.scale/1.2); applyTransform(); });
+  document.getElementById('zoom-reset').addEventListener('click', ()=>{ state.view = { x:80, y:40, scale:1 }; applyTransform(); });
+}
+
+function onTileMouseDown(e){
+  e.stopPropagation();
+  const el = e.currentTarget;
+  dragState = {
+    id: el.dataset.id, el,
+    startX: e.clientX, startY: e.clientY,
+    ox: parseFloat(el.style.left), oy: parseFloat(el.style.top),
+    moved: false
+  };
+  el.classList.add('dragging');
+}
+
+function onTileClick(e){
+  if(dragState && dragState.moved) return;
+  e.stopPropagation();
+  const id = e.currentTarget.dataset.id;
+  openAddMenu(id, e.currentTarget);
+}
+
+/* =========================================================================
+   Add menu
+   ========================================================================= */
+
+function closeAddMenu(){ document.getElementById('add-menu').style.display = 'none'; }
+
+function openAddMenu(personId, tileEl){
+  const menu = document.getElementById('add-menu');
+  const viewport = document.getElementById('canvas-viewport');
+  const vRect = viewport.getBoundingClientRect();
+  const tRect = tileEl.getBoundingClientRect();
+  menu.style.left = (tRect.right - vRect.left + 8) + 'px';
+  menu.style.top = (tRect.top - vRect.top) + 'px';
+  const person = state.people.get(personId);
+  menu.innerHTML = `
+    <button data-action="child">➕ Add child</button>
+    <button data-action="partner">💍 Add partner</button>
+    <button data-action="parent">⬆️ Add parent</button>
+    <div class="sep"></div>
+    <button data-action="detail">📄 View / edit details</button>
+  `;
+  menu.querySelectorAll('button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      closeAddMenu();
+      const action = btn.dataset.action;
+      if(action === 'detail') openDetail(personId);
+      else openQuickAddModal(action, personId);
+    });
+  });
+  menu.style.display = 'block';
+}
+
+/* =========================================================================
+   Modals: quick add, photo crop, confirm
+   ========================================================================= */
+
+function modalRoot(){ return document.getElementById('modal-root'); }
+
+function closeModal(){ modalRoot().innerHTML = ''; }
+
+function openQuickAddModal(kind, anchorPersonId){
+  const titles = { child: 'Add child', partner: 'Add partner', parent: 'Add parent', blank: 'New person' };
+  const showSpouseFields = kind === 'partner';
+  modalRoot().innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <h3>${titles[kind]}</h3>
+        <div class="field"><label>Name</label><input type="text" id="qa-name" autofocus></div>
+        ${showSpouseFields ? `
+          <div class="row2">
+            <div class="field"><label>Status</label>
+              <select id="qa-status">${SPOUSE_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Start date</label><input type="date" id="qa-start"></div>
+          </div>` : ''}
+        <div class="actions">
+          <button id="qa-cancel">Cancel</button>
+          <button class="primary" id="qa-create">Create</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('qa-cancel').addEventListener('click', closeModal);
+  document.getElementById('qa-create').addEventListener('click', async ()=>{
+    const name = document.getElementById('qa-name').value.trim();
+    if(!name) return;
+    const newId = createPerson({ name });
+    if(kind === 'child'){
+      addParentChild(anchorPersonId, newId, 'biological');
+      const spouseId = currentSpouseOf(anchorPersonId);
+      if(spouseId) addParentChild(spouseId, newId, 'biological');
+    } else if(kind === 'partner'){
+      const status = document.getElementById('qa-status').value;
+      const start = document.getElementById('qa-start').value || null;
+      addSpousePair(anchorPersonId, newId, { status, start_date: start, start_date_precision: start ? 'exact' : 'unknown' });
+    } else if(kind === 'parent'){
+      addParentChild(newId, anchorPersonId, 'biological');
+    }
+    closeModal();
+    await saveAll();
+  });
+}
+
+function openNewPersonModal(){ openQuickAddModal('blank', null); }
+
+/* =========================================================================
+   Photo crop
+   ========================================================================= */
+
+function openCropModal(file, onDone){
+  const url = URL.createObjectURL(file);
+  modalRoot().innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <h3>Crop photo</h3>
+        <div class="crop-stage" id="crop-stage">
+          <img id="crop-img" src="${url}">
+          <div class="crop-frame" id="crop-frame"></div>
+        </div>
+        <div class="field"><label>Zoom</label><input type="range" id="crop-zoom" min="100" max="300" value="140"></div>
+        <div class="actions">
+          <button id="crop-cancel">Cancel</button>
+          <button class="primary" id="crop-confirm">Use photo</button>
+        </div>
+      </div>
+    </div>`;
+  const img = document.getElementById('crop-img');
+  const frame = document.getElementById('crop-frame');
+  const stage = document.getElementById('crop-stage');
+  const FRAME_SIZE = 160;
+  frame.style.width = FRAME_SIZE + 'px';
+  frame.style.height = FRAME_SIZE + 'px';
+  frame.style.left = (170 - FRAME_SIZE/2) + 'px';
+  frame.style.top = (130 - FRAME_SIZE/2) + 'px';
+
+  let natW=0, natH=0, imgX=0, imgY=0, zoomPct=140;
+  function applyImgTransform(){
+    const scale = zoomPct/100;
+    img.style.width = (natW*scale) + 'px';
+    img.style.height = (natH*scale) + 'px';
+    img.style.left = imgX + 'px';
+    img.style.top = imgY + 'px';
+  }
+  img.onload = ()=>{
+    natW = img.naturalWidth; natH = img.naturalHeight;
+    const scale = zoomPct/100;
+    imgX = 170 - (natW*scale)/2;
+    imgY = 130 - (natH*scale)/2;
+    applyImgTransform();
+  };
+  document.getElementById('crop-zoom').addEventListener('input', e=>{
+    zoomPct = parseFloat(e.target.value);
+    applyImgTransform();
+  });
+  let dragging = null;
+  img.addEventListener('mousedown', e=>{ dragging = { sx:e.clientX, sy:e.clientY, ox:imgX, oy:imgY }; e.preventDefault(); });
+  window.addEventListener('mousemove', e=>{
+    if(!dragging) return;
+    imgX = dragging.ox + (e.clientX - dragging.sx);
+    imgY = dragging.oy + (e.clientY - dragging.sy);
+    applyImgTransform();
+  });
+  window.addEventListener('mouseup', ()=>{ dragging = null; });
+
+  document.getElementById('crop-cancel').addEventListener('click', ()=>{ URL.revokeObjectURL(url); closeModal(); });
+  document.getElementById('crop-confirm').addEventListener('click', ()=>{
+    const scale = zoomPct/100;
+    const frameLeft = 170 - FRAME_SIZE/2, frameTop = 130 - FRAME_SIZE/2;
+    const sx = (frameLeft - imgX) / scale;
+    const sy = (frameTop - imgY) / scale;
+    const sSize = FRAME_SIZE / scale;
+    const canvas = document.createElement('canvas');
+    canvas.width = 400; canvas.height = 400;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, sx, sy, sSize, sSize, 0, 0, 400, 400);
+    canvas.toBlob(blob=>{
+      URL.revokeObjectURL(url);
+      closeModal();
+      onDone(blob);
+    }, 'image/jpeg', 0.9);
+  });
+}
+
+/* =========================================================================
+   Detail panel
+   ========================================================================= */
+
+function openDetail(id){
+  state.selectedId = id;
+  document.getElementById('detail-panel').hidden = false;
+  renderDetailPanel();
+}
+
+function closeDetail(){
+  state.selectedId = null;
+  document.getElementById('detail-panel').hidden = true;
+}
+
+function fieldVal(v){ return v === null || v === undefined ? '' : v; }
+
+function renderDetailPanel(){
+  const panel = document.getElementById('detail-panel');
+  if(!state.selectedId){ panel.hidden = true; return; }
+  const person = state.people.get(state.selectedId);
+  if(!person){ closeDetail(); return; }
+  const fm = person.frontmatter;
+  const photoUrl = state.photoUrls.get(state.selectedId);
+
+  const extraKeys = Object.keys(fm).filter(k => !CORE_FIELD_SET.has(k));
+
+  panel.innerHTML = `
+    <div class="detail-head">
+      <h2>${escapeHtml(fm.name || '(unnamed)')}</h2>
+      <button class="icon" id="d-close">✕</button>
+    </div>
+    <div class="detail-body">
+      <div class="photo-upload">
+        <div class="preview" style="${photoUrl ? `background-image:url('${photoUrl}')` : ''}"></div>
+        <input type="file" id="d-photo-input" accept="image/*">
+      </div>
+
+      <div class="field"><label>Name</label><input type="text" id="d-name" value="${escapeHtml(fieldVal(fm.name))}"></div>
+      <div class="row2">
+        <div class="field"><label>Gender</label>
+          <input type="text" id="d-gender" list="gender-suggestions" value="${escapeHtml(fieldVal(fm.gender))}">
+          <datalist id="gender-suggestions"><option value="female"><option value="male"><option value="other"></datalist>
+        </div>
+        <div class="field"><label>Occupation</label><input type="text" id="d-occupation" value="${escapeHtml(fieldVal(fm.occupation))}"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Born</label><input type="date" id="d-dob" value="${fieldVal(fm.dob)}"></div>
+        <div class="field"><label>Precision</label>
+          <select id="d-dob-precision">${DATE_PRECISIONS.map(p=>`<option value="${p}" ${fm.dob_precision===p?'selected':''}>${p}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="field"><label>Birthplace</label><input type="text" id="d-birthplace" value="${escapeHtml(fieldVal(fm.birthplace))}"></div>
+      <div class="row2">
+        <div class="field"><label>Died</label><input type="date" id="d-dod" value="${fieldVal(fm.dod)}"></div>
+        <div class="field"><label>Deathplace</label><input type="text" id="d-deathplace" value="${escapeHtml(fieldVal(fm.deathplace))}"></div>
+      </div>
+
+      <div class="field"><label>Life story</label><textarea id="d-body" placeholder="Free-form notes, in Markdown…">${escapeHtml(person.body || '')}</textarea></div>
+
+      <fieldset>
+        <legend>Parents</legend>
+        <div class="rel-list" id="d-parents"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Children</legend>
+        <div class="rel-list" id="d-children"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Siblings</legend>
+        <div class="rel-list" id="d-siblings"></div>
+      </fieldset>
+      <fieldset>
+        <legend>Spouses / partners</legend>
+        <div class="rel-list" id="d-spouses"></div>
+      </fieldset>
+
+      ${extraKeys.length ? `
+      <fieldset>
+        <legend>Other fields</legend>
+        <div class="extra-fields" id="d-extra"></div>
+        <p class="muted">Carried over as-is; not editable here yet.</p>
+      </fieldset>` : ''}
+
+      <div class="actions" style="display:flex; gap:8px;">
+        <button class="primary" id="d-save">Save changes</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('d-close').addEventListener('click', closeDetail);
+
+  const relBox = (elId, list, emptyMsg) => {
+    const el = document.getElementById(elId);
+    if(!list.length){ el.innerHTML = `<span class="muted">${emptyMsg}</span>`; return; }
+    el.innerHTML = list.map(item => `
+      <div class="rel-item"><span class="name" data-id="${item.id}">${escapeHtml(nameOf(item.id))}</span>${item.tag ? `<span class="tag">${item.tag}</span>` : ''}</div>
+    `).join('');
+    el.querySelectorAll('.name').forEach(n=>n.addEventListener('click', ()=>openDetail(n.dataset.id)));
+  };
+
+  relBox('d-parents', (fm.parents||[]).map(id=>({id})), 'None recorded');
+  relBox('d-children', (fm.children||[]).map(id=>({id})), 'None recorded');
+  relBox('d-siblings', computeSiblings(state.selectedId, state.index).map(s=>({id:s.id, tag:s.type})), 'None');
+
+  const spousesEl = document.getElementById('d-spouses');
+  const spouses = fm.spouses || [];
+  spousesEl.innerHTML = (spouses.length ? spouses.map((s,idx) => `
+    <div class="spouse-card" data-idx="${idx}">
+      <div class="rel-item"><span class="name" data-id="${s.partner_id}">${escapeHtml(nameOf(s.partner_id))}</span><span class="tag">#${s.order}</span></div>
+      <div class="row2">
+        <div class="field"><label>Status</label>
+          <select class="sp-status">${SPOUSE_STATUSES.map(st=>`<option value="${st}" ${s.status===st?'selected':''}>${st}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Order</label><input type="text" class="sp-order" value="${fieldVal(s.order)}" placeholder="auto"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Start date</label><input type="date" class="sp-start" value="${fieldVal(s.start_date)}"></div>
+        <div class="field"><label>End date</label><input type="date" class="sp-end" value="${fieldVal(s.end_date)}"></div>
+      </div>
+    </div>
+  `).join('') : '<span class="muted">None recorded</span>');
+  spousesEl.querySelectorAll('.name').forEach(n=>n.addEventListener('click', ()=>openDetail(n.dataset.id)));
+
+  if(extraKeys.length){
+    const extraEl = document.getElementById('d-extra');
+    extraEl.innerHTML = extraKeys.map(k => `
+      <div class="extra-field-row"><input type="text" value="${escapeHtml(k)}" disabled style="max-width:120px;"><input type="text" value="${escapeHtml(fieldVal(fm[k]))}" disabled></div>
+    `).join('');
+  }
+
+  document.getElementById('d-photo-input').addEventListener('change', e=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    openCropModal(file, async (blob)=>{
+      const filename = state.selectedId + '.jpg';
+      await Storage.writePhoto(filename, blob);
+      fm.photo = '../photos/' + filename;
+      const url = URL.createObjectURL(blob);
+      const old = state.photoUrls.get(state.selectedId);
+      if(old) URL.revokeObjectURL(old);
+      state.photoUrls.set(state.selectedId, url);
+      await saveAll([state.selectedId]);
+    });
+  });
+
+  document.getElementById('d-save').addEventListener('click', async ()=>{
+    fm.name = document.getElementById('d-name').value.trim();
+    fm.gender = document.getElementById('d-gender').value.trim();
+    fm.occupation = document.getElementById('d-occupation').value.trim();
+    fm.dob = document.getElementById('d-dob').value || null;
+    fm.dob_precision = document.getElementById('d-dob-precision').value;
+    fm.birthplace = document.getElementById('d-birthplace').value.trim();
+    fm.dod = document.getElementById('d-dod').value || null;
+    fm.deathplace = document.getElementById('d-deathplace').value.trim();
+    person.body = document.getElementById('d-body').value;
+
+    spousesEl.querySelectorAll('.spouse-card').forEach(card=>{
+      const idx = parseInt(card.dataset.idx, 10);
+      const partnerId = spouses[idx].partner_id;
+      const status = card.querySelector('.sp-status').value;
+      const orderRaw = card.querySelector('.sp-order').value.trim();
+      const order = orderRaw ? parseInt(orderRaw,10) : null;
+      const start = card.querySelector('.sp-start').value || null;
+      const end = card.querySelector('.sp-end').value || null;
+      const pair = state.index.spousePairs.find(p =>
+        (p.a === state.selectedId && p.b === partnerId) || (p.b === state.selectedId && p.a === partnerId));
+      if(pair){
+        pair.status = status; pair.start_date = start; pair.end_date = end;
+        if(pair.a === state.selectedId) pair.order_a = order; else pair.order_b = order;
+      }
+    });
+
+    await saveAll();
+  });
+}
+
+function nameOf(id){
+  const p = state.people.get(id);
+  return p ? (p.frontmatter.name || '(unnamed)') : id;
+}
+
+/* =========================================================================
+   Bootstrap
+   ========================================================================= */
+
+async function handleOpenVault(){
+  try{
+    await Storage.pickFolder();
+  } catch(e){
+    if(e && e.name === 'AbortError') return;
+    console.error(e);
+    alert('Could not open folder: ' + e.message);
+    return;
+  }
+  document.getElementById('welcome').style.display = 'none';
+  document.getElementById('main-area').style.display = 'flex';
+  document.getElementById('btn-new-person').style.display = '';
+  await loadVault();
+}
+
+function init(){
+  if(!window.showDirectoryPicker){
+    document.getElementById('unsupported-msg').style.display = 'block';
+    document.getElementById('btn-open-vault').disabled = true;
+    document.getElementById('btn-open-vault-2').disabled = true;
+  }
+  document.getElementById('btn-open-vault').addEventListener('click', handleOpenVault);
+  document.getElementById('btn-open-vault-2').addEventListener('click', handleOpenVault);
+  document.getElementById('btn-new-person').addEventListener('click', openNewPersonModal);
+  document.addEventListener('click', (e)=>{
+    if(!e.target.closest('#add-menu') && !e.target.closest('.person-tile')) closeAddMenu();
+  });
+  initCanvasInteraction();
+
+  // Test hooks: lets an automated harness exercise pure logic and rendering
+  // with in-memory sample data, bypassing the File System Access API.
+  window.__TEST__ = {
+    parseFrontmatter, serializeFrontmatter, serializePersonFile, parseYAMLBlock,
+    slugify, generateId, computeMirrors, rebuildIndexFromPeople, computeSiblings,
+    resolveSpouseOrder, computeGenerations, computeLayout, emptyIndex,
+    state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
+    loadSample(people, index){
+      state.people = people; state.index = index || emptyIndex();
+      state.layoutOverrides = {};
+      document.getElementById('welcome').style.display = 'none';
+      document.getElementById('main-area').style.display = 'flex';
+      document.getElementById('btn-new-person').style.display = '';
+      computeMirrors(state.index, state.people);
+      renderAll();
+    },
+    openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal
+  };
+}
+
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', init);
+} else {
+  init();
+}
+
+})();
+</script>
+</body>
+</html>
