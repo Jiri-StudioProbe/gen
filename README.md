@@ -83,9 +83,13 @@ YourFolder/
   and the child is recorded as belonging to that relationship (not just
   "these two people happen to both have this child"), which matters once
   someone has more than one relationship on record.
-- Drag a tile to reposition it manually — the auto layout (grouped by
-  generation, couples side by side) won't get every blended family right,
-  and manual positions are saved.
+- Auto layout positions children under their actual parents (not
+  alphabetically), and a person with more than one partner sits between
+  them with each partner's kids grouped on their own side — adding a new
+  card extends its own family's space instead of reshuffling unrelated
+  branches. Drag a tile to reposition it manually for the cases it still
+  doesn't get right; manual positions are saved and children continue to
+  be positioned relative to a manually-moved parent.
 - Scroll to zoom, drag empty canvas space to pan.
 - The detail panel lets you edit a person's facts, life story (Markdown),
   photo (with a quick crop step), and their spouse/partner history

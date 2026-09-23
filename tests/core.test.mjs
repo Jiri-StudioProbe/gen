@@ -232,4 +232,45 @@ assert.equal(zLinks.length, 2);
 assert.ok(zLinks.every(l=>l.relationship_id===null), 'ambiguous rebuild should not guess a relationship id');
 ok('rebuild fallback stays conservative when a pair has multiple relationships on record');
 
+// ---- layout: a hub with two partners, two kids each, must not scramble ----
+// This is the scenario the family-block layout exists for: P is married to
+// both A and B (in sequence or in parallel doesn't matter for layout), each
+// relationship has two children. The hub should sit between its partners,
+// and each partner's children must land together on their own side of the
+// hub — not interleaved or collapsed onto the same position.
+const hubIdx = T.emptyIndex();
+hubIdx.spousePairs.push({ id:'rel-A', a:'P', b:'A', status:'married', start_date:'1990-01-01', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:1, order_b:1 });
+hubIdx.spousePairs.push({ id:'rel-B', a:'P', b:'B', status:'married', start_date:'2005-01-01', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:2, order_b:1 });
+for(const [parent, child] of [['P','kid1'],['A','kid1'],['P','kid2'],['A','kid2']]){
+  hubIdx.parentChild.push({ parent, child, type:'biological', relationship_id:'rel-A' });
+}
+for(const [parent, child] of [['P','kid3'],['B','kid3'],['P','kid4'],['B','kid4']]){
+  hubIdx.parentChild.push({ parent, child, type:'biological', relationship_id:'rel-B' });
+}
+const hubIds = ['P','A','B','kid1','kid2','kid3','kid4'];
+const { positions: hubPos, gen: hubGen } = T.computeLayout(hubIds, hubIdx, {});
+
+assert.equal(hubGen.get('P'), 0);
+assert.equal(hubGen.get('A'), 0);
+assert.equal(hubGen.get('B'), 0);
+for(const k of ['kid1','kid2','kid3','kid4']) assert.equal(hubGen.get(k), 1);
+ok('hub layout: generations correct (hub + 2 partners row 0, all kids row 1)');
+
+const px = id => hubPos.get(id).x;
+assert.ok((px('A') < px('P') && px('P') < px('B')) || (px('B') < px('P') && px('P') < px('A')),
+  `hub should sit between its two partners, got A=${px('A')} P=${px('P')} B=${px('B')}`);
+ok('hub layout: hub seated between its two partners, not off to one side');
+
+const kidAxs = [px('kid1'), px('kid2')], kidBxs = [px('kid3'), px('kid4')];
+const allLeftOfB = kidAxs.every(ax => kidBxs.every(bx => ax < bx));
+const allRightOfB = kidAxs.every(ax => kidBxs.every(bx => ax > bx));
+assert.ok(allLeftOfB || allRightOfB,
+  `each partner's kids must stay grouped on their own side, got A-kids=${kidAxs} B-kids=${kidBxs}`);
+ok('hub layout: each partner\'s children grouped together, not interleaved with the other family');
+
+const allXs = hubIds.map(px);
+assert.equal(new Set(allXs.filter((x,i)=>hubGen.get(hubIds[i])===0)).size, 3, 'no overlap among row 0');
+assert.equal(new Set(allXs.filter((x,i)=>hubGen.get(hubIds[i])===1)).size, 4, 'no overlap among row 1');
+ok('hub layout: no overlapping positions within a row');
+
 console.log(`\n${passed} checks passed.`);

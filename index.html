@@ -554,6 +554,39 @@ function computeSiblings(personId, index){
   return result;
 }
 
+// Groups parentChild links into "family units" — a couple (or single
+// parent) plus their children — so the layout can position a child under
+// its actual parents instead of sorting everyone in a generation row
+// alphabetically. Grouping key preference: relationship_id (most specific —
+// disambiguates divorce + remarriage to the same partner), then the full
+// sorted parent-id set (untracked/legacy two-parent links with no
+// relationship on record), then a solo parent.
+function buildFamilyUnits(index){
+  const byChild = new Map();
+  for(const pc of index.parentChild){
+    if(!byChild.has(pc.child)) byChild.set(pc.child, []);
+    byChild.get(pc.child).push(pc);
+  }
+  const unitsByKey = new Map();
+  for(const [child, links] of byChild){
+    const withRel = links.find(l => l.relationship_id);
+    let key, parentIds;
+    if(withRel){
+      key = 'rel:' + withRel.relationship_id;
+      parentIds = links.map(l => l.parent);
+    } else if(links.length >= 2){
+      key = 'pair:' + links.map(l => l.parent).slice().sort().join(',');
+      parentIds = links.map(l => l.parent);
+    } else {
+      key = 'solo:' + links[0].parent;
+      parentIds = [links[0].parent];
+    }
+    if(!unitsByKey.has(key)) unitsByKey.set(key, { id: key, parents: [...new Set(parentIds)], children: [] });
+    unitsByKey.get(key).children.push(child);
+  }
+  return [...unitsByKey.values()];
+}
+
 /* =========================================================================
    Layout: generation-based layered layout
    ========================================================================= */
@@ -601,9 +634,40 @@ function computeGenerations(ids, parentChild, spousePairs){
   return gen;
 }
 
+// Within a same-generation cluster of 3+ people joined by marriage (a hub
+// with two or more partners, e.g. remarriage), seats the hub between its
+// partners — [partner1, hub, partner2, ...] — rather than alphabetically,
+// so each partner's children naturally inherit a position on the correct
+// side of the hub in the row below. Falls back to a stable id sort for a
+// plain couple, a lone person, or a cluster with no single shared hub.
+function orderClusterMembers(members, index){
+  if(members.length <= 2) return members.slice().sort();
+  const memberSet = new Set(members);
+  const edges = new Map(members.map(m=>[m,[]]));
+  for(const sp of index.spousePairs){
+    if(memberSet.has(sp.a) && memberSet.has(sp.b)){
+      edges.get(sp.a).push(sp.b);
+      edges.get(sp.b).push(sp.a);
+    }
+  }
+  const hub = members.find(m => edges.get(m).length >= 2);
+  if(!hub) return members.slice().sort();
+  const partners = edges.get(hub).slice().sort();
+  const mid = Math.ceil(partners.length/2);
+  const rest = members.filter(m => m !== hub && !partners.includes(m)).sort();
+  return [...partners.slice(0, mid), hub, ...partners.slice(mid), ...rest];
+}
+
 function computeLayout(ids, index, overrides){
   overrides = overrides || {};
   const gen = computeGenerations(ids, index.parentChild, index.spousePairs);
+  const units = buildFamilyUnits(index);
+  // childId -> the family unit that produced them, used to look up where
+  // their parents ended up so children inherit a position under them
+  // instead of being sorted into the row independently.
+  const unitOfChild = new Map();
+  for(const u of units) for(const c of u.children) if(!unitOfChild.has(c)) unitOfChild.set(c, u);
+
   const parent = new Map(ids.map(id=>[id,id]));
   function find(x){ while(parent.get(x)!==x) x = parent.get(x); return x; }
   function union(a,b){ const ra=find(a), rb=find(b); if(ra!==rb) parent.set(ra,rb); }
@@ -617,19 +681,50 @@ function computeLayout(ids, index, overrides){
     rows.get(g).push(id);
   }
   const positions = new Map();
+  const orderKey = new Map(); // personId -> assigned x, read back in by their children's row
   const sortedGens = [...rows.keys()].sort((a,b)=>a-b);
   for(const g of sortedGens){
-    const rowIds = rows.get(g).slice().sort();
     const clusters = new Map();
-    for(const id of rowIds){
+    for(const id of rows.get(g)){
       const r = find(id);
       if(!clusters.has(r)) clusters.set(r, []);
       clusters.get(r).push(id);
     }
+    // Sort clusters by the average x their members' parents ended up at
+    // (i.e. where their family unit already sits), so a family's children
+    // land next to each other under their own parents rather than
+    // interleaved with unrelated cousins. Clusters with no placed parents
+    // yet (the top generation, or an unconnected branch) fall back to a
+    // stable id sort and are placed after everything that does have one.
+    const clusterEntries = [...clusters.values()].map(rawMembers => {
+      const members = orderClusterMembers(rawMembers, index);
+      const inherited = members
+        .map(id => {
+          if(!unitOfChild.has(id)) return undefined;
+          // Average ALL of the unit's parents, not just one — a hub with
+          // two partners must average to two different positions (hub +
+          // partner1's midpoint vs. hub + partner2's midpoint) so each
+          // partner's children land on the correct side of the hub,
+          // instead of both collapsing onto the hub's own x alone.
+          const parentXs = unitOfChild.get(id).parents.map(p => orderKey.get(p)).filter(v => v !== undefined);
+          return parentXs.length ? parentXs.reduce((a,b)=>a+b,0)/parentXs.length : undefined;
+        })
+        .filter(v => v !== undefined);
+      const key = inherited.length ? inherited.reduce((a,b)=>a+b,0)/inherited.length : null;
+      return { members, key };
+    });
+    clusterEntries.sort((e1,e2)=>{
+      if(e1.key !== null && e2.key !== null) return e1.key - e2.key;
+      if(e1.key !== null) return -1;
+      if(e2.key !== null) return 1;
+      return e1.members[0] < e2.members[0] ? -1 : 1;
+    });
     let x = 0;
-    for(const [,members] of clusters){
+    for(const { members } of clusterEntries){
       for(const id of members){
-        positions.set(id, overrides[id] ? { ...overrides[id] } : { x, y: g*ROW_H });
+        const pos = overrides[id] ? { ...overrides[id] } : { x, y: g*ROW_H };
+        positions.set(id, pos);
+        orderKey.set(id, pos.x);
         x += TILE_W + TILE_GAP;
       }
       x += CLUSTER_GAP;
@@ -1556,7 +1651,8 @@ function init(){
   window.__TEST__ = {
     parseFrontmatter, serializeFrontmatter, serializePersonFile, parseYAMLBlock,
     slugify, generateId, computeMirrors, rebuildIndexFromPeople, computeSiblings,
-    resolveSpouseOrder, computeGenerations, computeLayout, emptyIndex,
+    resolveSpouseOrder, computeGenerations, computeLayout, buildFamilyUnits,
+    orderClusterMembers, emptyIndex,
     state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
     findSpousePairId, findSpousePairIdIn,
     sampleFamilyData, handleTryDemo,
