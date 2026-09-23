@@ -90,7 +90,9 @@ YourFolder/
   branches. Drag a tile to reposition it manually for the cases it still
   doesn't get right; manual positions are saved and children continue to
   be positioned relative to a manually-moved parent.
-- Scroll to zoom, drag empty canvas space to pan.
+- Scroll to zoom, drag empty canvas space to pan. On a touchscreen (the
+  demo on iPad, for instance): drag a card or empty canvas the same way
+  with a finger, and pinch with two fingers to zoom.
 - The detail panel lets you edit a person's facts, life story (Markdown),
   photo (with a quick crop step), and their spouse/partner history
   (status, dates, and the 1st/2nd/… order — auto-suggested from dates but

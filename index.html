@@ -61,7 +61,7 @@
   #canvas-viewport{
     flex:1; position:relative; overflow:hidden; background:
       radial-gradient(circle, #e2dcce 1px, transparent 1px) 0 0/22px 22px, var(--bg);
-    cursor:grab;
+    cursor:grab; touch-action:none;
   }
   #canvas-viewport.panning{cursor:grabbing;}
   #canvas-content{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform;}
@@ -69,7 +69,7 @@
   .person-tile{
     position:absolute; width:var(--tile-w); background:var(--tile-bg); border:1.5px solid var(--tile-border);
     border-radius:10px; box-shadow:var(--shadow); padding:10px; cursor:pointer; user-select:none;
-    transition:box-shadow .12s, border-color .12s;
+    touch-action:none; transition:box-shadow .12s, border-color .12s;
   }
   .person-tile:hover{border-color:var(--accent); box-shadow:0 4px 14px rgba(40,32,20,.14);}
   .person-tile.dragging{opacity:.85; z-index:50; cursor:grabbing;}
@@ -146,7 +146,7 @@
 
   /* ---- Crop modal ---- */
   .crop-stage{position:relative; width:340px; height:260px; overflow:hidden; border-radius:8px; background:#111; margin:0 auto; touch-action:none;}
-  .crop-stage img{position:absolute; top:0; left:0; user-select:none; -webkit-user-drag:none; cursor:grab;}
+  .crop-stage img{position:absolute; top:0; left:0; user-select:none; -webkit-user-drag:none; cursor:grab; touch-action:none;}
   .crop-frame{position:absolute; border:2px solid #fff; box-shadow:0 0 0 2000px rgba(0,0,0,.45); pointer-events:none;}
 </style>
 </head>
@@ -991,7 +991,7 @@ function renderTiles(){
       <div class="years">${years}</div>
       ${person.frontmatter.dod ? '<span class="badge">deceased</span>' : ''}
     `;
-    tile.addEventListener('mousedown', onTileMouseDown);
+    tile.addEventListener('pointerdown', onTilePointerDown);
     tile.addEventListener('click', onTileClick);
     container.appendChild(tile);
   }
@@ -1098,40 +1098,74 @@ function renderRelationshipButtons(){
 
 /* =========================================================================
    Canvas interaction: pan / zoom / drag
+   Built on Pointer Events (not mouse-only events) so the same code path
+   handles mouse, touch, and pen — mouse-only handlers don't fire for touch,
+   which is why cards couldn't be dragged on iPad. Multi-touch pinch is
+   layered on top for zoom, since there's no wheel event on touch.
    ========================================================================= */
 
 let panState = null;
 let dragState = null;
+let pinchState = null;
+const activePointers = new Map(); // pointerId -> {x,y}, tracked regardless of target so a second finger landing anywhere (incl. on a tile) is still detected as the start of a pinch
+
+function pointerDistance(a, b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function pointerMidpoint(a, b){ return { x:(a.x+b.x)/2, y:(a.y+b.y)/2 }; }
+
+function zoomAt(clientX, clientY, newScaleRaw){
+  const viewport = document.getElementById('canvas-viewport');
+  const rect = viewport.getBoundingClientRect();
+  const newScale = Math.min(2.5, Math.max(0.25, newScaleRaw));
+  const cx = clientX - rect.left, cy = clientY - rect.top;
+  const wx = (cx - state.view.x) / state.view.scale;
+  const wy = (cy - state.view.y) / state.view.scale;
+  state.view.scale = newScale;
+  state.view.x = cx - wx*newScale;
+  state.view.y = cy - wy*newScale;
+  applyTransform();
+}
 
 function initCanvasInteraction(){
   const viewport = document.getElementById('canvas-viewport');
   viewport.addEventListener('wheel', e=>{
     e.preventDefault();
-    const delta = -e.deltaY * 0.0012;
-    const newScale = Math.min(2.5, Math.max(0.25, state.view.scale * (1+delta)));
-    const rect = viewport.getBoundingClientRect();
-    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-    const wx = (cx - state.view.x) / state.view.scale;
-    const wy = (cy - state.view.y) / state.view.scale;
-    state.view.scale = newScale;
-    state.view.x = cx - wx*newScale;
-    state.view.y = cy - wy*newScale;
-    applyTransform();
+    zoomAt(e.clientX, e.clientY, state.view.scale * (1 - e.deltaY*0.0012));
   }, { passive:false });
 
-  viewport.addEventListener('mousedown', e=>{
-    if(e.target.closest('.person-tile')) return;
+  viewport.addEventListener('pointerdown', e=>{
+    if(e.pointerType === 'mouse' && e.button !== 0) return;
+    activePointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if(activePointers.size >= 2){
+      // A second finger landed — this is a pinch, not a pan or a tile drag.
+      if(panState){ panState = null; viewport.classList.remove('panning'); }
+      if(dragState){ dragState.el.classList.remove('dragging'); dragState = null; }
+      const pts = [...activePointers.values()];
+      pinchState = { startDist: Math.max(1, pointerDistance(pts[0], pts[1])), startScale: state.view.scale };
+      return;
+    }
+    if(pinchState || dragState) return;
+    if(e.target.closest('.person-tile, .rel-add-btn')) return; // tile/button handle their own gesture
     panState = { startX:e.clientX, startY:e.clientY, ox:state.view.x, oy:state.view.y };
     viewport.classList.add('panning');
     closeAddMenu();
   });
-  window.addEventListener('mousemove', e=>{
+
+  window.addEventListener('pointermove', e=>{
+    if(activePointers.has(e.pointerId)) activePointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+
+    if(pinchState && activePointers.size >= 2){
+      const pts = [...activePointers.values()];
+      const m = pointerMidpoint(pts[0], pts[1]);
+      const newScale = pinchState.startScale * (pointerDistance(pts[0], pts[1]) / pinchState.startDist);
+      zoomAt(m.x, m.y, newScale);
+      return;
+    }
     if(panState){
       state.view.x = panState.ox + (e.clientX - panState.startX);
       state.view.y = panState.oy + (e.clientY - panState.startY);
       applyTransform();
     }
-    if(dragState){
+    if(dragState && dragState.pointerId === e.pointerId){
       const dx = (e.clientX - dragState.startX) / state.view.scale;
       const dy = (e.clientY - dragState.startY) / state.view.scale;
       dragState.el.style.left = (dragState.ox + dx) + 'px';
@@ -1139,9 +1173,17 @@ function initCanvasInteraction(){
       dragState.moved = true;
     }
   });
-  window.addEventListener('mouseup', async ()=>{
+
+  window.addEventListener('pointerup', onPointerEnd);
+  window.addEventListener('pointercancel', onPointerEnd);
+  async function onPointerEnd(e){
+    activePointers.delete(e.pointerId);
+    if(pinchState){
+      if(activePointers.size < 2) pinchState = null;
+      return;
+    }
     if(panState){ panState = null; viewport.classList.remove('panning'); }
-    if(dragState){
+    if(dragState && dragState.pointerId === e.pointerId){
       const { id, el, moved } = dragState;
       dragState = null;
       el.classList.remove('dragging');
@@ -1153,18 +1195,20 @@ function initCanvasInteraction(){
         await persistLayout();
       }
     }
-  });
+  }
 
   document.getElementById('zoom-in').addEventListener('click', ()=>{ state.view.scale = Math.min(2.5, state.view.scale*1.2); applyTransform(); });
   document.getElementById('zoom-out').addEventListener('click', ()=>{ state.view.scale = Math.max(0.25, state.view.scale/1.2); applyTransform(); });
   document.getElementById('zoom-reset').addEventListener('click', ()=>{ state.view = { x:80, y:40, scale:1 }; applyTransform(); });
 }
 
-function onTileMouseDown(e){
-  e.stopPropagation();
+function onTilePointerDown(e){
+  if(e.pointerType === 'mouse' && e.button !== 0) return;
+  if(activePointers.size >= 1) return; // a second finger is coming down elsewhere — let it become a pinch, don't start a drag
   const el = e.currentTarget;
+  try{ el.setPointerCapture(e.pointerId); }catch(_){}
   dragState = {
-    id: el.dataset.id, el,
+    id: el.dataset.id, el, pointerId: e.pointerId,
     startX: e.clientX, startY: e.clientY,
     ox: parseFloat(el.style.left), oy: parseFloat(el.style.top),
     moved: false
@@ -1337,14 +1381,19 @@ function openCropModal(file, onDone){
     applyImgTransform();
   });
   let dragging = null;
-  img.addEventListener('mousedown', e=>{ dragging = { sx:e.clientX, sy:e.clientY, ox:imgX, oy:imgY }; e.preventDefault(); });
-  window.addEventListener('mousemove', e=>{
-    if(!dragging) return;
+  img.addEventListener('pointerdown', e=>{
+    dragging = { pointerId:e.pointerId, sx:e.clientX, sy:e.clientY, ox:imgX, oy:imgY };
+    try{ img.setPointerCapture(e.pointerId); }catch(_){}
+    e.preventDefault();
+  });
+  window.addEventListener('pointermove', e=>{
+    if(!dragging || e.pointerId !== dragging.pointerId) return;
     imgX = dragging.ox + (e.clientX - dragging.sx);
     imgY = dragging.oy + (e.clientY - dragging.sy);
     applyImgTransform();
   });
-  window.addEventListener('mouseup', ()=>{ dragging = null; });
+  window.addEventListener('pointerup', e=>{ if(dragging && e.pointerId === dragging.pointerId) dragging = null; });
+  window.addEventListener('pointercancel', e=>{ if(dragging && e.pointerId === dragging.pointerId) dragging = null; });
 
   document.getElementById('crop-cancel').addEventListener('click', ()=>{ URL.revokeObjectURL(url); closeModal(); });
   document.getElementById('crop-confirm').addEventListener('click', ()=>{
