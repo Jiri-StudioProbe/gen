@@ -25,6 +25,24 @@ npx serve .
 Then open the printed URL in **desktop Chrome or Edge** and click
 **Open folder…**, choosing (or creating) an empty folder for your tree.
 
+It's also deployed to GitHub Pages on every push:
+https://jiri-studioprobe.github.io/gen/
+
+### Trying it without a real folder
+
+The File System Access API is Chromium-desktop only — it doesn't exist on
+iOS/iPadOS in *any* browser (Safari, Chrome, Arc — they're all WebKit
+under the hood there, by Apple's rules), and Firefox/Safari on desktop
+don't implement it either. On any of those, **Open folder…** is disabled
+and you'll see an explanation.
+
+Click **Try demo** instead: it loads a small sample family tree entirely
+in memory, so you can try the canvas, Add menu, drag-to-reposition, and
+detail panel from a phone, tablet, or any browser. Nothing is saved —
+there's a banner reminding you of that, and refreshing resets it. Useful
+for UI work; switch to a real folder on desktop Chrome/Edge once you need
+persistence.
+
 ## How your data is stored
 
 ```

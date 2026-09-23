@@ -47,6 +47,14 @@
   #welcome h2{font-size:22px; margin:0;}
   #welcome p{color:var(--muted); max-width:440px; line-height:1.5; margin:0;}
   #welcome .unsupported{color:var(--danger); font-weight:600;}
+  #welcome button + button{margin-left:8px;}
+
+  #demo-banner{
+    display:flex; align-items:center; justify-content:center; gap:12px;
+    background:#f4e3c8; color:#6b4a1f; font-size:13px; padding:7px 16px;
+    border-bottom:1px solid #e0c493;
+  }
+  #demo-banner button{padding:3px 9px; font-size:12px;}
 
   /* ---- Main layout ---- */
   main{flex:1; position:relative; display:flex; overflow:hidden;}
@@ -145,11 +153,16 @@
     <button id="btn-open-vault">Open folder…</button>
   </header>
 
+  <div id="demo-banner" style="display:none;">
+    Demo mode — sample data, nothing is saved. <button id="btn-exit-demo" class="icon">Exit demo</button>
+  </div>
+
   <div id="welcome">
     <h2>Open a folder to begin</h2>
     <p>Family Tree stores your data as plain Markdown files in a folder you choose &mdash; the same folder can be opened as an Obsidian vault. Nothing leaves your machine.</p>
-    <p id="unsupported-msg" class="unsupported" style="display:none;">Your browser doesn't support the File System Access API. Please use desktop Chrome or Edge.</p>
+    <p id="unsupported-msg" class="unsupported" style="display:none;">Your browser doesn't support the File System Access API — this needs desktop Chrome or Edge (it isn't available on iOS/iPadOS at all, in any browser, since none of them can use a different engine there). Try the demo below instead to explore the UI.</p>
     <button class="primary" id="btn-open-vault-2">Open folder…</button>
+    <button id="btn-try-demo">Try demo (sample data, nothing saved)</button>
   </div>
 
   <main style="display:none;" id="main-area">
@@ -670,6 +683,7 @@ const state = {
   photoUrls: new Map(),   // id -> object URL
   view: { x: 80, y: 40, scale: 1 },
   selectedId: null,
+  demoMode: false,
 };
 
 function setStatus(text){ document.getElementById('status-text').textContent = text; }
@@ -711,25 +725,28 @@ async function loadPhotos(){
 }
 
 async function persistPerson(id){
+  if(!Storage.root) return; // demo mode: in-memory only, nothing to write
   const person = state.people.get(id);
   const content = serializePersonFile(person.frontmatter, person.body);
   await Storage.writePersonFile(person.filename, content);
 }
 
 async function persistIndex(){
+  if(!Storage.root) return;
   await Storage.writeJSON('_index', 'relationships.json', state.index);
 }
 
 async function persistLayout(){
+  if(!Storage.root) return;
   await Storage.writeJSON('_index', 'layout.json', state.layoutOverrides);
 }
 
 async function saveAll(affectedIds){
-  setStatus('Saving…');
+  setStatus(Storage.root ? 'Saving…' : 'Demo mode — not saved');
   computeMirrors(state.index, state.people);
   await persistIndex();
   for(const id of affectedIds || state.people.keys()) await persistPerson(id);
-  setStatus('Saved');
+  setStatus(Storage.root ? 'Saved' : 'Demo mode — not saved');
   renderAll();
 }
 
@@ -796,7 +813,7 @@ function renderAll(){
   renderConnectors();
   applyTransform();
   renderDetailPanel();
-  document.getElementById('vault-name').textContent = Storage.root ? Storage.root.name : '';
+  document.getElementById('vault-name').textContent = Storage.root ? Storage.root.name : (state.demoMode ? 'Demo' : '');
 }
 
 function renderTiles(){
@@ -1264,7 +1281,7 @@ function renderDetailPanel(){
     if(!file) return;
     openCropModal(file, async (blob)=>{
       const filename = state.selectedId + '.jpg';
-      await Storage.writePhoto(filename, blob);
+      if(Storage.root) await Storage.writePhoto(filename, blob);
       fm.photo = '../photos/' + filename;
       const url = URL.createObjectURL(blob);
       const old = state.photoUrls.get(state.selectedId);
@@ -1314,6 +1331,12 @@ function nameOf(id){
    Bootstrap
    ========================================================================= */
 
+function enterMainView(){
+  document.getElementById('welcome').style.display = 'none';
+  document.getElementById('main-area').style.display = 'flex';
+  document.getElementById('btn-new-person').style.display = '';
+}
+
 async function handleOpenVault(){
   try{
     await Storage.pickFolder();
@@ -1323,10 +1346,68 @@ async function handleOpenVault(){
     alert('Could not open folder: ' + e.message);
     return;
   }
-  document.getElementById('welcome').style.display = 'none';
-  document.getElementById('main-area').style.display = 'flex';
-  document.getElementById('btn-new-person').style.display = '';
+  state.demoMode = false;
+  document.getElementById('demo-banner').style.display = 'none';
+  enterMainView();
   await loadVault();
+}
+
+// Sample data for demo mode: a small tree that shows off spouse clustering,
+// remarriage, and a couple of generations, so there's something worth
+// dragging/clicking on immediately.
+function sampleFamilyData(){
+  const people = new Map();
+  const mk = (id, name, extra) => people.set(id, {
+    filename: id + '.md',
+    frontmatter: { id, name, occupation:'', birthplace:'', ...extra },
+    body: `Sample notes for ${name}. Edit freely — this is demo data and nothing is saved.`
+  });
+  mk('vaclav-novak-1950', 'Václav Novák', { dob:'1950-02-01', gender:'male' });
+  mk('marie-novakova-1952', 'Marie Nováková', { dob:'1952-05-10', gender:'female' });
+  mk('jiri-novak-1978', 'Jiří Novák', { dob:'1978-03-14', gender:'male' });
+  mk('petra-novakova-1982', 'Petra Nováková', { dob:'1982-11-02', gender:'female' });
+  mk('anna-novakova-1980', 'Anna Nováková', { dob:'1980-07-20', gender:'female' });
+  mk('jan-novak-2005', 'Jan Novák', { dob:'2005-09-01', gender:'male' });
+
+  const index = emptyIndex();
+  index.parentChild.push({ parent:'vaclav-novak-1950', child:'jiri-novak-1978', type:'biological' });
+  index.parentChild.push({ parent:'marie-novakova-1952', child:'jiri-novak-1978', type:'biological' });
+  index.parentChild.push({ parent:'vaclav-novak-1950', child:'petra-novakova-1982', type:'biological' });
+  index.parentChild.push({ parent:'marie-novakova-1952', child:'petra-novakova-1982', type:'biological' });
+  index.parentChild.push({ parent:'jiri-novak-1978', child:'jan-novak-2005', type:'biological' });
+  index.parentChild.push({ parent:'anna-novakova-1980', child:'jan-novak-2005', type:'biological' });
+  index.spousePairs.push({ id:newRelId(), a:'vaclav-novak-1950', b:'marie-novakova-1952', status:'married', start_date:'1975-06-14', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:null, order_b:null });
+  index.spousePairs.push({ id:newRelId(), a:'jiri-novak-1978', b:'anna-novakova-1980', status:'married', start_date:'2003-06-14', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:null, order_b:null });
+  return { people, index };
+}
+
+function loadInMemory(people, index){
+  Storage.root = null;
+  state.people = people;
+  state.index = index || emptyIndex();
+  state.layoutOverrides = {};
+  state.photoUrls = new Map();
+  computeMirrors(state.index, state.people);
+  enterMainView();
+  renderAll();
+}
+
+function handleTryDemo(){
+  state.demoMode = true;
+  document.getElementById('demo-banner').style.display = 'flex';
+  const { people, index } = sampleFamilyData();
+  loadInMemory(people, index);
+  setStatus('Demo mode — not saved');
+}
+
+function exitDemo(){
+  state.demoMode = false;
+  state.selectedId = null;
+  document.getElementById('demo-banner').style.display = 'none';
+  document.getElementById('main-area').style.display = 'none';
+  document.getElementById('welcome').style.display = 'flex';
+  document.getElementById('btn-new-person').style.display = 'none';
+  setStatus('');
 }
 
 function init(){
@@ -1337,6 +1418,8 @@ function init(){
   }
   document.getElementById('btn-open-vault').addEventListener('click', handleOpenVault);
   document.getElementById('btn-open-vault-2').addEventListener('click', handleOpenVault);
+  document.getElementById('btn-try-demo').addEventListener('click', handleTryDemo);
+  document.getElementById('btn-exit-demo').addEventListener('click', exitDemo);
   document.getElementById('btn-new-person').addEventListener('click', openNewPersonModal);
   document.addEventListener('click', (e)=>{
     if(!e.target.closest('#add-menu') && !e.target.closest('.person-tile')) closeAddMenu();
@@ -1350,15 +1433,8 @@ function init(){
     slugify, generateId, computeMirrors, rebuildIndexFromPeople, computeSiblings,
     resolveSpouseOrder, computeGenerations, computeLayout, emptyIndex,
     state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
-    loadSample(people, index){
-      state.people = people; state.index = index || emptyIndex();
-      state.layoutOverrides = {};
-      document.getElementById('welcome').style.display = 'none';
-      document.getElementById('main-area').style.display = 'flex';
-      document.getElementById('btn-new-person').style.display = '';
-      computeMirrors(state.index, state.people);
-      renderAll();
-    },
+    sampleFamilyData, handleTryDemo,
+    loadSample: loadInMemory,
     openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal
   };
 }
