@@ -195,24 +195,24 @@ relIdx.spousePairs.push({ id:'rel-2', a:'mom', b:'stepdad', status:'married', st
 
 // addParentChild writes to the live state.index; exercise the same
 // attribution logic directly against relIdx so this test doesn't leak into
-// (or depend on) other tests' shared state.
+// (or depend on) other tests' shared state. The UI now attributes a child
+// to a relationship by its explicit spousePairs id (the "Other parent"
+// dropdown's value IS the id — no guessing/lookup involved), so the test
+// mirrors that directly rather than searching for it.
 function addPC(index, parent, child, relationshipId){
   index.parentChild.push({ parent, child, type:'biological', relationship_id: relationshipId || null });
 }
-const relForKid1 = T.findSpousePairIdIn(relIdx, 'mom', 'dad', true);
-addPC(relIdx, 'mom', 'kid1', relForKid1);
-addPC(relIdx, 'dad', 'kid1', relForKid1);
-assert.equal(relForKid1, 'rel-1');
+addPC(relIdx, 'mom', 'kid1', 'rel-1');
+addPC(relIdx, 'dad', 'kid1', 'rel-1');
 const kid1Links = relIdx.parentChild.filter(pc=>pc.child==='kid1');
 assert.equal(kid1Links.length, 2);
 assert.ok(kid1Links.every(l=>l.relationship_id==='rel-1'));
 ok('relationship attribution: child of couple A tagged with that spousePairs id');
 
-const relForKid2 = T.findSpousePairIdIn(relIdx, 'mom', 'stepdad', true);
-addPC(relIdx, 'mom', 'kid2', relForKid2);
-addPC(relIdx, 'stepdad', 'kid2', relForKid2);
-assert.equal(relForKid2, 'rel-2');
-assert.notEqual(relForKid2, relForKid1);
+addPC(relIdx, 'mom', 'kid2', 'rel-2');
+addPC(relIdx, 'stepdad', 'kid2', 'rel-2');
+const kid2Links = relIdx.parentChild.filter(pc=>pc.child==='kid2');
+assert.ok(kid2Links.every(l=>l.relationship_id==='rel-2'));
 ok('relationship attribution: remarriage produces a distinct relationship id');
 
 // Rebuild from mirrored files must NOT guess when a pair has more than one
@@ -221,7 +221,6 @@ ok('relationship attribution: remarriage produces a distinct relationship id');
 const ambiguousIdx = T.emptyIndex();
 ambiguousIdx.spousePairs.push({ id:'amb-1', a:'x', b:'y', status:'divorced', start_date:'1990-01-01', start_date_precision:'exact', end_date:'1995-01-01', end_date_precision:'exact', order_a:1, order_b:1 });
 ambiguousIdx.spousePairs.push({ id:'amb-2', a:'x', b:'y', status:'married', start_date:'2000-01-01', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:2, order_b:2 });
-assert.equal(T.findSpousePairIdIn(ambiguousIdx, 'x', 'y'), 'amb-2'); // live-add path: falls back to most recent
 const rebuiltPeople = new Map();
 rebuiltPeople.set('x', { filename:'x.md', frontmatter:{ id:'x', name:'X', parents:[], children:['z'], spouses:[] }, body:'' });
 rebuiltPeople.set('y', { filename:'y.md', frontmatter:{ id:'y', name:'Y', parents:[], children:['z'], spouses:[] }, body:'' });

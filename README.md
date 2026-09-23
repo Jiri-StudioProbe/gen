@@ -76,8 +76,12 @@ YourFolder/
   tree.
 - Click any person's tile to open the **Add menu**: add a child, add a
   partner, add a parent (for backfilling a spouse's own parents), or jump
-  to that person's detail view. A child added this way is recorded against
-  that one person (plus their current spouse, if they have one).
+  to that person's detail view. If that person has a partner (or more than
+  one) on record, **Add child** asks which one — if any — is the other
+  parent, defaulting to "None recorded" rather than guessing; the new
+  child could be with a different partner than whichever one comes to
+  mind first. To add a child of a specific relationship without the
+  prompt, use that relationship's **+** connector instead (below).
 - Adding a partner to someone who already has kids on record (the tree
   was built out of order — child and one parent added first, the other
   parent added afterwards as "a partner" rather than through the child's

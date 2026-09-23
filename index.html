@@ -909,26 +909,6 @@ function addParentChild(parentId, childId, type, relationshipId){
   }
 }
 
-// Finds the spousePairs entry recording a's and b's relationship, so a child
-// added from either a single tile or the connector's + button can be
-// attributed to that specific relationship (not just "these two people
-// independently have this child") — matters once someone has more than one
-// relationship on record (remarriage) or their spouse isn't decided yet.
-function findSpousePairIdIn(index, aId, bId, preferActive){
-  const candidates = index.spousePairs.filter(sp =>
-    (sp.a===aId && sp.b===bId) || (sp.a===bId && sp.b===aId));
-  if(!candidates.length) return null;
-  if(preferActive){
-    const active = candidates.find(sp => sp.status==='married' || sp.status==='partnered');
-    if(active) return active.id;
-  }
-  return candidates[candidates.length-1].id;
-}
-
-function findSpousePairId(aId, bId, preferActive){
-  return findSpousePairIdIn(state.index, aId, bId, preferActive);
-}
-
 function addSpousePair(aId, bId, opts){
   opts = opts || {};
   const entry = {
@@ -951,13 +931,6 @@ function childrenOf(personId){
     if(pc.parent === personId && !seen.has(pc.child)){ seen.add(pc.child); result.push(pc.child); }
   }
   return result;
-}
-
-function currentSpouseOf(personId){
-  const p = state.people.get(personId);
-  const spouses = (p.frontmatter.spouses || []);
-  const active = spouses.find(s => s.status === 'married' || s.status === 'partnered');
-  return active ? active.partner_id : null;
 }
 
 /* =========================================================================
@@ -1291,6 +1264,17 @@ function openQuickAddModal(kind, anchorPersonId, opts){
   // first, the other parent added afterwards as "a partner" rather than
   // via the child's own Add parent flow).
   const stepChildIds = kind === 'partner' ? childrenOf(anchorPersonId) : [];
+  // Adding a child directly from a person's tile (not the relationship +)
+  // is otherwise ambiguous the moment that person has any partner on
+  // record: this child could be with that partner, or with someone else
+  // entirely (a previous relationship, or no recorded other parent). Ask
+  // rather than guessing — defaults to "no other parent recorded" so
+  // nothing is silently attributed to the wrong relationship.
+  const anchorPartners = (kind === 'child' && !opts.parentIds)
+    ? state.index.spousePairs
+        .filter(sp => sp.a === anchorPersonId || sp.b === anchorPersonId)
+        .map(sp => ({ pairId: sp.id, partnerId: sp.a === anchorPersonId ? sp.b : sp.a, status: sp.status }))
+    : [];
   modalRoot().innerHTML = `
     <div class="modal-backdrop">
       <div class="modal">
@@ -1302,6 +1286,14 @@ function openQuickAddModal(kind, anchorPersonId, opts){
               <select id="qa-status">${SPOUSE_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join('')}</select>
             </div>
             <div class="field"><label>Start date</label><input type="date" id="qa-start"></div>
+          </div>` : ''}
+        ${anchorPartners.length ? `
+          <div class="field">
+            <label>Other parent</label>
+            <select id="qa-other-parent">
+              <option value="">None recorded</option>
+              ${anchorPartners.map(p => `<option value="${p.pairId}">${escapeHtml(nameOf(p.partnerId))}${p.status !== 'married' && p.status !== 'partnered' ? ` (${p.status})` : ''}</option>`).join('')}
+            </select>
           </div>` : ''}
         ${stepChildIds.length ? `
           <fieldset>
@@ -1328,16 +1320,17 @@ function openQuickAddModal(kind, anchorPersonId, opts){
     const newId = createPerson({ name });
     if(kind === 'child'){
       // Both parents (when there are two) are recorded as coming from the
-      // same relationship, not as two independent parent-child facts — see
-      // findSpousePairId / opts.relationshipId.
+      // same relationship, not as two independent parent-child facts.
       let parentIds, relId;
       if(opts.parentIds){
         parentIds = opts.parentIds;
         relId = opts.relationshipId || null;
       } else {
-        const spouseId = currentSpouseOf(anchorPersonId);
-        parentIds = spouseId ? [anchorPersonId, spouseId] : [anchorPersonId];
-        relId = spouseId ? findSpousePairId(anchorPersonId, spouseId, true) : null;
+        const selectedPairId = document.getElementById('qa-other-parent')?.value || '';
+        const pair = selectedPairId ? state.index.spousePairs.find(sp => sp.id === selectedPairId) : null;
+        const otherParentId = pair ? (pair.a === anchorPersonId ? pair.b : pair.a) : null;
+        parentIds = otherParentId ? [anchorPersonId, otherParentId] : [anchorPersonId];
+        relId = pair ? pair.id : null;
       }
       for(const pid of parentIds) addParentChild(pid, newId, 'biological', relId);
     } else if(kind === 'partner'){
@@ -1740,7 +1733,7 @@ function init(){
     resolveSpouseOrder, computeGenerations, computeLayout, buildFamilyUnits,
     orderClusterMembers, emptyIndex,
     state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
-    findSpousePairId, findSpousePairIdIn, childrenOf,
+    childrenOf,
     sampleFamilyData, handleTryDemo,
     loadSample: loadInMemory,
     openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal,
