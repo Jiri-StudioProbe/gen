@@ -800,6 +800,18 @@ const Storage = {
       const file = await fh.getFile();
       return URL.createObjectURL(file);
     } catch(e){ return null; }
+  },
+  async deletePersonFile(filename){
+    try{
+      const dir = await this.root.getDirectoryHandle('people');
+      await dir.removeEntry(filename);
+    } catch(e){ /* already gone or never written (e.g. never saved) — fine */ }
+  },
+  async deletePhoto(filename){
+    try{
+      const dir = await this.root.getDirectoryHandle('photos');
+      await dir.removeEntry(filename);
+    } catch(e){ /* no photo to remove */ }
   }
 };
 
@@ -897,6 +909,29 @@ function createPerson(fields){
   };
   state.people.set(id, { filename: id + '.md', frontmatter, body: '' });
   return id;
+}
+
+// Removes a person and every relationship link involving them (as parent,
+// child, or spouse). Deliberately not cascading: their parents, children,
+// and partners stay in the tree, just unlinked from the deleted person —
+// deleting one person shouldn't take a whole branch down with them.
+async function deletePerson(id){
+  const person = state.people.get(id);
+  if(!person) return;
+
+  state.index.parentChild = state.index.parentChild.filter(pc => pc.parent !== id && pc.child !== id);
+  state.index.spousePairs = state.index.spousePairs.filter(sp => sp.a !== id && sp.b !== id);
+  delete state.layoutOverrides[id];
+  state.people.delete(id);
+  const photoUrl = state.photoUrls.get(id);
+  if(photoUrl){ URL.revokeObjectURL(photoUrl); state.photoUrls.delete(id); }
+  if(state.selectedId === id) closeDetail();
+
+  await Storage.deletePersonFile(person.filename);
+  if(person.frontmatter.photo){
+    await Storage.deletePhoto(person.frontmatter.photo.split('/').pop());
+  }
+  await saveAll();
 }
 
 function addParentChild(parentId, childId, type, relationshipId){
@@ -1361,6 +1396,28 @@ function openAddChildForRelationship(spousePairId){
   openQuickAddModal('child', null, { parentIds: [sp.a, sp.b], relationshipId: sp.id });
 }
 
+function openDeleteConfirm(id){
+  const person = state.people.get(id);
+  if(!person) return;
+  const name = person.frontmatter.name || '(unnamed)';
+  modalRoot().innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal">
+        <h3>Delete ${escapeHtml(name)}?</h3>
+        <p class="muted">Removes ${escapeHtml(name)} and their recorded relationships (as a parent, child, and spouse). Their own parents, children, and partners are not deleted — just unlinked from them. This can't be undone from within the app.</p>
+        <div class="actions">
+          <button id="del-cancel">Cancel</button>
+          <button class="danger" id="del-confirm">Delete</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('del-cancel').addEventListener('click', closeModal);
+  document.getElementById('del-confirm').addEventListener('click', async ()=>{
+    closeModal();
+    await deletePerson(id);
+  });
+}
+
 /* =========================================================================
    Photo crop
    ========================================================================= */
@@ -1530,11 +1587,13 @@ function renderDetailPanel(){
 
       <div class="actions" style="display:flex; gap:8px;">
         <button class="primary" id="d-save">Save changes</button>
+        <button class="danger" id="d-delete">Delete person</button>
       </div>
     </div>
   `;
 
   document.getElementById('d-close').addEventListener('click', closeDetail);
+  document.getElementById('d-delete').addEventListener('click', ()=>openDeleteConfirm(state.selectedId));
 
   const relBox = (elId, list, emptyMsg) => {
     const el = document.getElementById(elId);
@@ -1733,11 +1792,11 @@ function init(){
     resolveSpouseOrder, computeGenerations, computeLayout, buildFamilyUnits,
     orderClusterMembers, emptyIndex,
     state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
-    childrenOf,
+    childrenOf, deletePerson,
     sampleFamilyData, handleTryDemo,
     loadSample: loadInMemory,
     openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal,
-    openQuickAddModal, openAddChildForRelationship
+    openQuickAddModal, openAddChildForRelationship, openDeleteConfirm
   };
 }
 

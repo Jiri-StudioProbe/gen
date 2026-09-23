@@ -302,4 +302,45 @@ ok('"also a parent of": new partner linked to the existing child, and the pre-ex
 T.state.index = savedIndex;
 T.state.people = savedPeople;
 
+// ---- delete person: removes them and every relationship link involving
+// them, without cascading to their parents/children/partners ----
+const delIdx = T.emptyIndex();
+delIdx.parentChild.push({ parent:'gma', child:'mom', type:'biological', relationship_id:null });
+delIdx.parentChild.push({ parent:'mom', child:'kid', type:'biological', relationship_id:'r1' });
+delIdx.parentChild.push({ parent:'dad', child:'kid', type:'biological', relationship_id:'r1' });
+delIdx.spousePairs.push({ id:'r1', a:'mom', b:'dad', status:'married', start_date:null, start_date_precision:'unknown', end_date:null, end_date_precision:null, order_a:null, order_b:null });
+
+const delPeople = new Map();
+for(const id of ['gma','mom','dad','kid']) delPeople.set(id, { filename:id+'.md', frontmatter:{ id, name:id, parents:[], children:[], spouses:[] }, body:'' });
+
+const savedIndex2 = T.state.index, savedPeople2 = T.state.people, savedSelected = T.state.selectedId;
+T.state.index = delIdx;
+T.state.people = delPeople;
+T.state.selectedId = 'mom';
+T.computeMirrors(T.state.index, T.state.people);
+
+await T.deletePerson('mom');
+
+assert.equal(T.state.people.has('mom'), false);
+assert.equal(T.state.selectedId, null, 'deleting the currently-open person closes the detail view');
+ok('deletePerson: removes the person and clears selection if they were open');
+
+const remainingLinks = T.state.index.parentChild;
+assert.ok(!remainingLinks.some(pc => pc.parent === 'mom' || pc.child === 'mom'), 'no parentChild link should reference the deleted person');
+assert.ok(!T.state.index.spousePairs.some(sp => sp.a === 'mom' || sp.b === 'mom'), 'no spousePairs entry should reference the deleted person');
+ok('deletePerson: strips every relationship link involving them (parent, child, and spouse)');
+
+assert.ok(T.state.people.has('gma') && T.state.people.has('dad') && T.state.people.has('kid'),
+  'deleting mom must not cascade-delete her own parent, her spouse, or her child');
+ok('deletePerson: does not cascade — related people stay in the tree, just unlinked');
+
+const kidLinksAfter = T.state.index.parentChild.filter(pc => pc.child === 'kid');
+assert.equal(kidLinksAfter.length, 1);
+assert.equal(kidLinksAfter[0].parent, 'dad');
+ok('deletePerson: kid keeps their link to the surviving parent (dad)');
+
+T.state.index = savedIndex2;
+T.state.people = savedPeople2;
+T.state.selectedId = savedSelected;
+
 console.log(`\n${passed} checks passed.`);

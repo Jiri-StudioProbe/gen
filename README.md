@@ -107,7 +107,13 @@ YourFolder/
 - The detail panel lets you edit a person's facts, life story (Markdown),
   photo (with a quick crop step), and their spouse/partner history
   (status, dates, and the 1st/2nd/… order — auto-suggested from dates but
-  overridable).
+  overridable). **Delete person** there removes them and every
+  relationship link involving them (as a parent, child, or spouse), after
+  a confirmation — their own parents, children, and partners are not
+  deleted, just unlinked from them. This can't be undone from within the
+  app (though the person's `.md` file, if you ever need it back, may
+  still be recoverable from your OS's own trash/file history, since the
+  app just asks the browser to delete the file normally).
 
 ## v1 scope
 
