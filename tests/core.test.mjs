@@ -187,4 +187,49 @@ assert.equal(byPartner.c, 2);
 assert.equal(byPartner.a, 3);
 ok('spouse order: manual override respected, rest chronological');
 
+// ---- relationship attribution: a child belongs to a specific couple's
+// relationship, not just to two independent parent links ----
+const relIdx = T.emptyIndex();
+relIdx.spousePairs.push({ id:'rel-1', a:'mom', b:'dad', status:'divorced', start_date:'1995-01-01', start_date_precision:'exact', end_date:'2001-01-01', end_date_precision:'exact', order_a:1, order_b:1 });
+relIdx.spousePairs.push({ id:'rel-2', a:'mom', b:'stepdad', status:'married', start_date:'2003-01-01', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:2, order_b:1 });
+
+// addParentChild writes to the live state.index; exercise the same
+// attribution logic directly against relIdx so this test doesn't leak into
+// (or depend on) other tests' shared state.
+function addPC(index, parent, child, relationshipId){
+  index.parentChild.push({ parent, child, type:'biological', relationship_id: relationshipId || null });
+}
+const relForKid1 = T.findSpousePairIdIn(relIdx, 'mom', 'dad', true);
+addPC(relIdx, 'mom', 'kid1', relForKid1);
+addPC(relIdx, 'dad', 'kid1', relForKid1);
+assert.equal(relForKid1, 'rel-1');
+const kid1Links = relIdx.parentChild.filter(pc=>pc.child==='kid1');
+assert.equal(kid1Links.length, 2);
+assert.ok(kid1Links.every(l=>l.relationship_id==='rel-1'));
+ok('relationship attribution: child of couple A tagged with that spousePairs id');
+
+const relForKid2 = T.findSpousePairIdIn(relIdx, 'mom', 'stepdad', true);
+addPC(relIdx, 'mom', 'kid2', relForKid2);
+addPC(relIdx, 'stepdad', 'kid2', relForKid2);
+assert.equal(relForKid2, 'rel-2');
+assert.notEqual(relForKid2, relForKid1);
+ok('relationship attribution: remarriage produces a distinct relationship id');
+
+// Rebuild from mirrored files must NOT guess when a pair has more than one
+// relationship on record (divorce + remarriage to the same person) — that
+// can't be disambiguated from the flat parents/spouses mirror.
+const ambiguousIdx = T.emptyIndex();
+ambiguousIdx.spousePairs.push({ id:'amb-1', a:'x', b:'y', status:'divorced', start_date:'1990-01-01', start_date_precision:'exact', end_date:'1995-01-01', end_date_precision:'exact', order_a:1, order_b:1 });
+ambiguousIdx.spousePairs.push({ id:'amb-2', a:'x', b:'y', status:'married', start_date:'2000-01-01', start_date_precision:'exact', end_date:null, end_date_precision:null, order_a:2, order_b:2 });
+assert.equal(T.findSpousePairIdIn(ambiguousIdx, 'x', 'y'), 'amb-2'); // live-add path: falls back to most recent
+const rebuiltPeople = new Map();
+rebuiltPeople.set('x', { filename:'x.md', frontmatter:{ id:'x', name:'X', parents:[], children:['z'], spouses:[] }, body:'' });
+rebuiltPeople.set('y', { filename:'y.md', frontmatter:{ id:'y', name:'Y', parents:[], children:['z'], spouses:[] }, body:'' });
+rebuiltPeople.set('z', { filename:'z.md', frontmatter:{ id:'z', name:'Z', parents:['x','y'], children:[], spouses:[] }, body:'' });
+const rebuiltAmbiguous = T.rebuildIndexFromPeople(rebuiltPeople);
+const zLinks = rebuiltAmbiguous.parentChild.filter(pc=>pc.child==='z');
+assert.equal(zLinks.length, 2);
+assert.ok(zLinks.every(l=>l.relationship_id===null), 'ambiguous rebuild should not guess a relationship id');
+ok('rebuild fallback stays conservative when a pair has multiple relationships on record');
+
 console.log(`\n${passed} checks passed.`);

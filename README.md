@@ -76,7 +76,13 @@ YourFolder/
   tree.
 - Click any person's tile to open the **Add menu**: add a child, add a
   partner, add a parent (for backfilling a spouse's own parents), or jump
-  to that person's detail view.
+  to that person's detail view. A child added this way is recorded against
+  that one person (plus their current spouse, if they have one).
+- Click the **+** sitting on a couple's connector line to add a child of
+  that specific relationship — both partners are pre-filled as parents,
+  and the child is recorded as belonging to that relationship (not just
+  "these two people happen to both have this child"), which matters once
+  someone has more than one relationship on record.
 - Drag a tile to reposition it manually — the auto layout (grouped by
   generation, couples side by side) won't get every blended family right,
   and manual positions are saved.

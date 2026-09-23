@@ -84,6 +84,14 @@
     background:#efe6d6; color:var(--accent);
   }
 
+  .rel-add-btn{
+    position:absolute; width:22px; height:22px; padding:0; border-radius:50%;
+    background:var(--accent); color:#fff; border:2px solid var(--bg);
+    font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.25); z-index:5;
+  }
+  .rel-add-btn:hover{ filter:brightness(1.1); transform:scale(1.08); }
+
   #zoom-controls{position:absolute; right:14px; bottom:14px; display:flex; flex-direction:column; gap:6px; z-index:15;}
   #zoom-controls button{width:34px; height:34px; padding:0; font-size:16px;}
 
@@ -466,7 +474,7 @@ function rebuildIndexFromPeople(peopleMap){
       const key = parentId+'>'+id;
       if(seenPC.has(key)) continue;
       seenPC.add(key);
-      index.parentChild.push({ parent: parentId, child: id, type: 'biological' });
+      index.parentChild.push({ parent: parentId, child: id, type: 'biological', relationship_id: null });
     }
   }
   const seenPairs = new Map(); // sorted-pair+start_date -> entry
@@ -484,6 +492,35 @@ function rebuildIndexFromPeople(peopleMap){
       };
       seenPairs.set(key, entry);
       index.spousePairs.push(entry);
+    }
+  }
+
+  // The mirrored `parents` field on a person file is just a flat array of
+  // ids (by design, for Obsidian readability) — it doesn't say which
+  // relationship a child came from. Approximate it on rebuild: when a
+  // child has exactly two recorded parents and they have exactly one
+  // relationship on record together, attribute both links to it. Multiple
+  // relationships between the same two people (divorce + remarriage) can't
+  // be disambiguated from the flat mirror, so those are left unattributed
+  // rather than guessed — this is a disaster-recovery fallback, not the
+  // day-to-day path, which always has the real index available.
+  const parentsByChild = new Map();
+  for(const pc of index.parentChild){
+    if(!parentsByChild.has(pc.child)) parentsByChild.set(pc.child, []);
+    parentsByChild.get(pc.child).push(pc);
+  }
+  for(const [, links] of parentsByChild){
+    if(links.length !== 2) continue;
+    // Conservative on purpose: only attribute when there's exactly one
+    // relationship between these two parents on record. Multiple (divorce
+    // + remarriage) can't be disambiguated from the flat mirror, so those
+    // are left unattributed rather than guessed.
+    const candidates = index.spousePairs.filter(sp =>
+      (sp.a===links[0].parent && sp.b===links[1].parent) ||
+      (sp.a===links[1].parent && sp.b===links[0].parent));
+    if(candidates.length === 1){
+      links[0].relationship_id = candidates[0].id;
+      links[1].relationship_id = candidates[0].id;
     }
   }
   return index;
@@ -767,10 +804,34 @@ function createPerson(fields){
   return id;
 }
 
-function addParentChild(parentId, childId, type){
+function addParentChild(parentId, childId, type, relationshipId){
   type = type || 'biological';
-  const exists = state.index.parentChild.some(pc=>pc.parent===parentId && pc.child===childId);
-  if(!exists) state.index.parentChild.push({ parent: parentId, child: childId, type });
+  const existing = state.index.parentChild.find(pc=>pc.parent===parentId && pc.child===childId);
+  if(existing){
+    if(relationshipId && !existing.relationship_id) existing.relationship_id = relationshipId;
+  } else {
+    state.index.parentChild.push({ parent: parentId, child: childId, type, relationship_id: relationshipId || null });
+  }
+}
+
+// Finds the spousePairs entry recording a's and b's relationship, so a child
+// added from either a single tile or the connector's + button can be
+// attributed to that specific relationship (not just "these two people
+// independently have this child") — matters once someone has more than one
+// relationship on record (remarriage) or their spouse isn't decided yet.
+function findSpousePairIdIn(index, aId, bId, preferActive){
+  const candidates = index.spousePairs.filter(sp =>
+    (sp.a===aId && sp.b===bId) || (sp.a===bId && sp.b===aId));
+  if(!candidates.length) return null;
+  if(preferActive){
+    const active = candidates.find(sp => sp.status==='married' || sp.status==='partnered');
+    if(active) return active.id;
+  }
+  return candidates[candidates.length-1].id;
+}
+
+function findSpousePairId(aId, bId, preferActive){
+  return findSpousePairIdIn(state.index, aId, bId, preferActive);
 }
 
 function addSpousePair(aId, bId, opts){
@@ -811,6 +872,7 @@ function renderAll(){
   state.positions = positions;
   renderTiles();
   renderConnectors();
+  renderRelationshipButtons();
   applyTransform();
   renderDetailPanel();
   document.getElementById('vault-name').textContent = Storage.root ? Storage.root.name : (state.demoMode ? 'Demo' : '');
@@ -858,20 +920,33 @@ function renderConnectors(){
     return { x: pos.x + TILE_W/2, y: pos.y + 100 };
   };
 
-  const drawn = new Set();
+  // One line per relationship (spousePairs entry), not per person-pair: two
+  // people can have more than one relationship on record (divorce then
+  // remarriage), and each needs its own + control for adding children to
+  // that specific relationship. Duplicates between the same two people are
+  // offset vertically so they don't sit exactly on top of each other.
+  state.relationshipMidpoints = new Map(); // spousePairs id -> {x,y}
+  const pairGroups = new Map();
   for(const sp of state.index.spousePairs){
     if(!state.positions.has(sp.a) || !state.positions.has(sp.b)) continue;
     const key = [sp.a,sp.b].sort().join('|');
-    if(drawn.has(key)) continue;
-    drawn.add(key);
-    const ca = center(sp.a), cb = center(sp.b);
-    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-    line.setAttribute('x1', ca.x); line.setAttribute('y1', ca.y - 55);
-    line.setAttribute('x2', cb.x); line.setAttribute('y2', cb.y - 55);
-    line.setAttribute('stroke', sp.status === 'divorced' ? '#c69a7b' : '#a98a63');
-    line.setAttribute('stroke-width', '2');
-    if(sp.status === 'divorced') line.setAttribute('stroke-dasharray', '4,3');
-    svg.appendChild(line);
+    if(!pairGroups.has(key)) pairGroups.set(key, []);
+    pairGroups.get(key).push(sp);
+  }
+  for(const [, group] of pairGroups){
+    group.forEach((sp, i)=>{
+      const ca = center(sp.a), cb = center(sp.b);
+      const yOffset = i * 16;
+      const y1 = ca.y - 55 - yOffset, y2 = cb.y - 55 - yOffset;
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', ca.x); line.setAttribute('y1', y1);
+      line.setAttribute('x2', cb.x); line.setAttribute('y2', y2);
+      line.setAttribute('stroke', sp.status === 'divorced' ? '#c69a7b' : '#a98a63');
+      line.setAttribute('stroke-width', '2');
+      if(sp.status === 'divorced') line.setAttribute('stroke-dasharray', '4,3');
+      svg.appendChild(line);
+      state.relationshipMidpoints.set(sp.id, { x: (ca.x+cb.x)/2, y: (y1+y2)/2 });
+    });
   }
 
   const byParentSet = new Map();
@@ -897,6 +972,32 @@ function renderConnectors(){
     dline.setAttribute('d', `M ${midX} ${midY+30} L ${midX} ${cc.y-100} L ${cc.x} ${cc.y-100}`);
     dline.setAttribute('fill','none'); dline.setAttribute('stroke','#bdb093'); dline.setAttribute('stroke-width','1.5');
     svg.appendChild(dline);
+  }
+}
+
+// A small "+" sitting on each spouse connector, at the relationship's own
+// midpoint (state.relationshipMidpoints, computed in renderConnectors) —
+// the entry point for adding a child attributed to that specific
+// relationship rather than to either parent independently.
+function renderRelationshipButtons(){
+  const container = document.getElementById('canvas-content');
+  container.querySelectorAll('.rel-add-btn').forEach(el=>el.remove());
+  for(const sp of state.index.spousePairs){
+    const mid = state.relationshipMidpoints && state.relationshipMidpoints.get(sp.id);
+    if(!mid) continue;
+    const btn = document.createElement('button');
+    btn.className = 'rel-add-btn';
+    btn.type = 'button';
+    btn.title = 'Add child of this relationship';
+    btn.textContent = '+';
+    btn.style.left = (mid.x - 11) + 'px';
+    btn.style.top = (mid.y - 11) + 'px';
+    btn.addEventListener('mousedown', e => e.stopPropagation());
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      openAddChildForRelationship(sp.id);
+    });
+    container.appendChild(btn);
   }
 }
 
@@ -1023,13 +1124,18 @@ function modalRoot(){ return document.getElementById('modal-root'); }
 
 function closeModal(){ modalRoot().innerHTML = ''; }
 
-function openQuickAddModal(kind, anchorPersonId){
+function openQuickAddModal(kind, anchorPersonId, opts){
+  opts = opts || {};
   const titles = { child: 'Add child', partner: 'Add partner', parent: 'Add parent', blank: 'New person' };
+  let title = titles[kind];
+  if(kind === 'child' && opts.parentIds && opts.parentIds.length === 2){
+    title = `Add child of ${nameOf(opts.parentIds[0])} & ${nameOf(opts.parentIds[1])}`;
+  }
   const showSpouseFields = kind === 'partner';
   modalRoot().innerHTML = `
     <div class="modal-backdrop">
       <div class="modal">
-        <h3>${titles[kind]}</h3>
+        <h3>${escapeHtml(title)}</h3>
         <div class="field"><label>Name</label><input type="text" id="qa-name" autofocus></div>
         ${showSpouseFields ? `
           <div class="row2">
@@ -1050,9 +1156,19 @@ function openQuickAddModal(kind, anchorPersonId){
     if(!name) return;
     const newId = createPerson({ name });
     if(kind === 'child'){
-      addParentChild(anchorPersonId, newId, 'biological');
-      const spouseId = currentSpouseOf(anchorPersonId);
-      if(spouseId) addParentChild(spouseId, newId, 'biological');
+      // Both parents (when there are two) are recorded as coming from the
+      // same relationship, not as two independent parent-child facts — see
+      // findSpousePairId / opts.relationshipId.
+      let parentIds, relId;
+      if(opts.parentIds){
+        parentIds = opts.parentIds;
+        relId = opts.relationshipId || null;
+      } else {
+        const spouseId = currentSpouseOf(anchorPersonId);
+        parentIds = spouseId ? [anchorPersonId, spouseId] : [anchorPersonId];
+        relId = spouseId ? findSpousePairId(anchorPersonId, spouseId, true) : null;
+      }
+      for(const pid of parentIds) addParentChild(pid, newId, 'biological', relId);
     } else if(kind === 'partner'){
       const status = document.getElementById('qa-status').value;
       const start = document.getElementById('qa-start').value || null;
@@ -1066,6 +1182,15 @@ function openQuickAddModal(kind, anchorPersonId){
 }
 
 function openNewPersonModal(){ openQuickAddModal('blank', null); }
+
+// Entry point for the "+" control rendered on a spouse connector — adds a
+// child attributed to that specific relationship, with both partners
+// pre-filled as parents.
+function openAddChildForRelationship(spousePairId){
+  const sp = state.index.spousePairs.find(s => s.id === spousePairId);
+  if(!sp) return;
+  openQuickAddModal('child', null, { parentIds: [sp.a, sp.b], relationshipId: sp.id });
+}
 
 /* =========================================================================
    Photo crop
@@ -1433,9 +1558,11 @@ function init(){
     slugify, generateId, computeMirrors, rebuildIndexFromPeople, computeSiblings,
     resolveSpouseOrder, computeGenerations, computeLayout, emptyIndex,
     state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
+    findSpousePairId, findSpousePairIdIn,
     sampleFamilyData, handleTryDemo,
     loadSample: loadInMemory,
-    openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal
+    openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal,
+    openAddChildForRelationship
   };
 }
 
