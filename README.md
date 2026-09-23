@@ -78,6 +78,13 @@ YourFolder/
   partner, add a parent (for backfilling a spouse's own parents), or jump
   to that person's detail view. A child added this way is recorded against
   that one person (plus their current spouse, if they have one).
+- Adding a partner to someone who already has kids on record (the tree
+  was built out of order — child and one parent added first, the other
+  parent added afterwards as "a partner" rather than through the child's
+  own Add parent) offers a checklist to also record the new partner as a
+  parent of those existing children. Left unchecked by default — check
+  only the ones the new partner is actually a biological/adoptive parent
+  of, not every stepchild.
 - Click the **+** sitting on a couple's connector line to add a child of
   that specific relationship — both partners are pre-filled as parents,
   and the child is recorded as belonging to that relationship (not just

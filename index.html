@@ -931,12 +931,26 @@ function findSpousePairId(aId, bId, preferActive){
 
 function addSpousePair(aId, bId, opts){
   opts = opts || {};
-  state.index.spousePairs.push({
+  const entry = {
     id: newRelId(), a: aId, b: bId, status: opts.status || 'married',
     start_date: opts.start_date || null, start_date_precision: opts.start_date_precision || 'unknown',
     end_date: opts.end_date || null, end_date_precision: opts.end_date_precision || null,
     order_a: null, order_b: null
-  });
+  };
+  state.index.spousePairs.push(entry);
+  return entry;
+}
+
+// The distinct children a person is already recorded as a parent of, in a
+// stable order — used to offer "is the new partner also a parent of
+// these?" when adding a partner to someone who already has kids.
+function childrenOf(personId){
+  const seen = new Set();
+  const result = [];
+  for(const pc of state.index.parentChild){
+    if(pc.parent === personId && !seen.has(pc.child)){ seen.add(pc.child); result.push(pc.child); }
+  }
+  return result;
 }
 
 function currentSpouseOf(personId){
@@ -1271,6 +1285,12 @@ function openQuickAddModal(kind, anchorPersonId, opts){
     title = `Add child of ${nameOf(opts.parentIds[0])} & ${nameOf(opts.parentIds[1])}`;
   }
   const showSpouseFields = kind === 'partner';
+  // When adding a partner to someone who already has children on record,
+  // offer to attribute those children to the new partner too — the common
+  // case being the tree was built out of order (child + one parent added
+  // first, the other parent added afterwards as "a partner" rather than
+  // via the child's own Add parent flow).
+  const stepChildIds = kind === 'partner' ? childrenOf(anchorPersonId) : [];
   modalRoot().innerHTML = `
     <div class="modal-backdrop">
       <div class="modal">
@@ -1283,6 +1303,18 @@ function openQuickAddModal(kind, anchorPersonId, opts){
             </div>
             <div class="field"><label>Start date</label><input type="date" id="qa-start"></div>
           </div>` : ''}
+        ${stepChildIds.length ? `
+          <fieldset>
+            <legend>Also a parent of</legend>
+            <div class="rel-list">
+              ${stepChildIds.map(id => `
+                <label class="rel-item" style="cursor:pointer;">
+                  <input type="checkbox" class="qa-also-parent" value="${id}">
+                  <span class="name" style="cursor:pointer;">${escapeHtml(nameOf(id))}</span>
+                </label>
+              `).join('')}
+            </div>
+          </fieldset>` : ''}
         <div class="actions">
           <button id="qa-cancel">Cancel</button>
           <button class="primary" id="qa-create">Create</button>
@@ -1311,7 +1343,12 @@ function openQuickAddModal(kind, anchorPersonId, opts){
     } else if(kind === 'partner'){
       const status = document.getElementById('qa-status').value;
       const start = document.getElementById('qa-start').value || null;
-      addSpousePair(anchorPersonId, newId, { status, start_date: start, start_date_precision: start ? 'exact' : 'unknown' });
+      const pair = addSpousePair(anchorPersonId, newId, { status, start_date: start, start_date_precision: start ? 'exact' : 'unknown' });
+      const checked = [...document.querySelectorAll('.qa-also-parent:checked')].map(cb => cb.value);
+      for(const childId of checked){
+        addParentChild(anchorPersonId, childId, 'biological', pair.id); // backfills the existing link's relationship_id too
+        addParentChild(newId, childId, 'biological', pair.id);
+      }
     } else if(kind === 'parent'){
       addParentChild(newId, anchorPersonId, 'biological');
     }
@@ -1703,11 +1740,11 @@ function init(){
     resolveSpouseOrder, computeGenerations, computeLayout, buildFamilyUnits,
     orderClusterMembers, emptyIndex,
     state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
-    findSpousePairId, findSpousePairIdIn,
+    findSpousePairId, findSpousePairIdIn, childrenOf,
     sampleFamilyData, handleTryDemo,
     loadSample: loadInMemory,
     openDetail, openAddMenu, closeAddMenu, closeModal, openNewPersonModal,
-    openAddChildForRelationship
+    openQuickAddModal, openAddChildForRelationship
   };
 }
 

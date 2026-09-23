@@ -273,4 +273,34 @@ assert.equal(new Set(allXs.filter((x,i)=>hubGen.get(hubIds[i])===0)).size, 3, 'n
 assert.equal(new Set(allXs.filter((x,i)=>hubGen.get(hubIds[i])===1)).size, 4, 'no overlap among row 1');
 ok('hub layout: no overlapping positions within a row');
 
+// ---- "also a parent of" flow: add child X, a parent, then a partner for
+// that parent who should optionally also become X's parent ----
+// (mirrors what the UI's qa-also-parent checklist does on create)
+const spIdx = T.emptyIndex();
+spIdx.parentChild.push({ parent:'parent1', child:'x', type:'biological', relationship_id:null });
+
+const peopleSP = new Map();
+peopleSP.set('x', { filename:'x.md', frontmatter:{ id:'x', name:'X' }, body:'' });
+peopleSP.set('parent1', { filename:'parent1.md', frontmatter:{ id:'parent1', name:'Parent1' }, body:'' });
+peopleSP.set('y', { filename:'y.md', frontmatter:{ id:'y', name:'Y' }, body:'' });
+
+const savedIndex = T.state.index, savedPeople = T.state.people;
+T.state.index = spIdx;
+T.state.people = peopleSP;
+
+assert.equal(j(T.childrenOf('parent1')), j(['x']));
+ok('childrenOf: finds a person\'s existing children before a partner is added');
+
+const pair = T.addSpousePair('parent1', 'y', { status:'married' });
+T.addParentChild('parent1', 'x', 'biological', pair.id); // backfills the pre-existing link
+T.addParentChild('y', 'x', 'biological', pair.id);
+
+const xLinksAfter = T.state.index.parentChild.filter(pc => pc.child === 'x');
+assert.equal(xLinksAfter.length, 2);
+assert.ok(xLinksAfter.every(l => l.relationship_id === pair.id));
+ok('"also a parent of": new partner linked to the existing child, and the pre-existing link backfilled with the same relationship_id');
+
+T.state.index = savedIndex;
+T.state.people = savedPeople;
+
 console.log(`\n${passed} checks passed.`);
