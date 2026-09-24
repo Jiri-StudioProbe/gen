@@ -989,7 +989,6 @@ function renderAll(){
   state.positions = positions;
   renderTiles();
   renderConnectors();
-  renderRelationshipButtons();
   applyTransform();
   renderDetailPanel();
   document.getElementById('vault-name').textContent = Storage.root ? Storage.root.name : (state.demoMode ? 'Demo' : '');
@@ -1023,26 +1022,25 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-function renderConnectors(){
-  const svg = document.getElementById('connectors');
-  svg.innerHTML = '';
-  let maxX = 0, maxY = 0;
-  for(const pos of state.positions.values()){ maxX = Math.max(maxX, pos.x+TILE_W+200); maxY = Math.max(maxY, pos.y+300); }
-  svg.setAttribute('width', maxX);
-  svg.setAttribute('height', maxY);
-
+// Builds the canvas's connectors as one list, one entry per relationship —
+// either a 'partner' connector (a spousePairs entry) or a 'parent-child'
+// connector (one child's fan-in from its recorded parents). It's a single
+// concept end to end: the only thing that sets a partner connector apart
+// is that it also carries a spot for the '+' that adds a child of that
+// relationship — not a separate subsystem, just a field on the same record.
+function buildConnectors(){
   const center = id => {
     const pos = state.positions.get(id);
     if(!pos) return null;
     return { x: pos.x + TILE_W/2, y: pos.y + 100 };
   };
+  const connectors = [];
 
-  // One line per relationship (spousePairs entry), not per person-pair: two
-  // people can have more than one relationship on record (divorce then
-  // remarriage), and each needs its own + control for adding children to
-  // that specific relationship. Duplicates between the same two people are
-  // offset vertically so they don't sit exactly on top of each other.
-  state.relationshipMidpoints = new Map(); // spousePairs id -> {x,y}
+  // One connector per relationship, not per person-pair: two people can
+  // have more than one relationship on record (divorce then remarriage),
+  // and each needs its own line and its own + control. Duplicates between
+  // the same two people are offset vertically so they don't sit exactly
+  // on top of each other.
   const pairGroups = new Map();
   for(const sp of state.index.spousePairs){
     if(!state.positions.has(sp.a) || !state.positions.has(sp.b)) continue;
@@ -1055,23 +1053,22 @@ function renderConnectors(){
       const ca = center(sp.a), cb = center(sp.b);
       const yOffset = i * 16;
       const y1 = ca.y - 55 - yOffset, y2 = cb.y - 55 - yOffset;
-      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
-      line.setAttribute('x1', ca.x); line.setAttribute('y1', y1);
-      line.setAttribute('x2', cb.x); line.setAttribute('y2', y2);
-      line.setAttribute('stroke', sp.status === 'divorced' ? '#c69a7b' : '#a98a63');
-      line.setAttribute('stroke-width', '2');
-      if(sp.status === 'divorced') line.setAttribute('stroke-dasharray', '4,3');
-      svg.appendChild(line);
-      state.relationshipMidpoints.set(sp.id, { x: (ca.x+cb.x)/2, y: (y1+y2)/2 });
+      connectors.push({
+        type: 'partner', relationshipId: sp.id, status: sp.status,
+        x1: ca.x, y1, x2: cb.x, y2,
+        plus: { x: (ca.x+cb.x)/2, y: (y1+y2)/2 },
+      });
     });
   }
 
-  const byParentSet = new Map();
+  // One connector per child, fanning in from each of their recorded
+  // parents to a shared drop point above the child.
+  const byChild = new Map();
   for(const pc of state.index.parentChild){
-    if(!byParentSet.has(pc.child)) byParentSet.set(pc.child, []);
-    byParentSet.get(pc.child).push(pc.parent);
+    if(!byChild.has(pc.child)) byChild.set(pc.child, []);
+    byChild.get(pc.child).push(pc.parent);
   }
-  for(const [child, parents] of byParentSet){
+  for(const [child, parents] of byChild){
     if(!state.positions.has(child)) continue;
     const validParents = parents.filter(p=>state.positions.has(p));
     if(!validParents.length) continue;
@@ -1079,42 +1076,56 @@ function renderConnectors(){
     const parentPts = validParents.map(center);
     const midX = parentPts.reduce((s,p)=>s+p.x,0)/parentPts.length;
     const midY = parentPts[0].y - 55;
-    for(const pp of parentPts){
-      const path = document.createElementNS('http://www.w3.org/2000/svg','path');
-      path.setAttribute('d', `M ${pp.x} ${pp.y-55} L ${pp.x} ${midY+30} L ${midX} ${midY+30}`);
-      path.setAttribute('fill','none'); path.setAttribute('stroke','#bdb093'); path.setAttribute('stroke-width','1.5');
-      svg.appendChild(path);
-    }
-    const dline = document.createElementNS('http://www.w3.org/2000/svg','path');
-    dline.setAttribute('d', `M ${midX} ${midY+30} L ${midX} ${cc.y-100} L ${cc.x} ${cc.y-100}`);
-    dline.setAttribute('fill','none'); dline.setAttribute('stroke','#bdb093'); dline.setAttribute('stroke-width','1.5');
-    svg.appendChild(dline);
+    const paths = parentPts.map(pp => `M ${pp.x} ${pp.y-55} L ${pp.x} ${midY+30} L ${midX} ${midY+30}`);
+    paths.push(`M ${midX} ${midY+30} L ${midX} ${cc.y-100} L ${cc.x} ${cc.y-100}`);
+    connectors.push({ type: 'parent-child', childId: child, paths });
   }
+
+  return connectors;
 }
 
-// A small "+" sitting on each spouse connector, at the relationship's own
-// midpoint (state.relationshipMidpoints, computed in renderConnectors) —
-// the entry point for adding a child attributed to that specific
-// relationship rather than to either parent independently.
-function renderRelationshipButtons(){
-  const container = document.getElementById('canvas-content');
-  container.querySelectorAll('.rel-add-btn').forEach(el=>el.remove());
-  for(const sp of state.index.spousePairs){
-    const mid = state.relationshipMidpoints && state.relationshipMidpoints.get(sp.id);
-    if(!mid) continue;
-    const btn = document.createElement('button');
-    btn.className = 'rel-add-btn';
-    btn.type = 'button';
-    btn.title = 'Add child of this relationship';
-    btn.textContent = '+';
-    btn.style.left = (mid.x - 11) + 'px';
-    btn.style.top = (mid.y - 11) + 'px';
-    btn.addEventListener('mousedown', e => e.stopPropagation());
-    btn.addEventListener('click', e => {
-      e.stopPropagation();
-      openAddChildForRelationship(sp.id);
-    });
-    container.appendChild(btn);
+function renderConnectors(){
+  const svg = document.getElementById('connectors');
+  const canvasContent = document.getElementById('canvas-content');
+  svg.innerHTML = '';
+  canvasContent.querySelectorAll('.rel-add-btn').forEach(el=>el.remove());
+
+  let maxX = 0, maxY = 0;
+  for(const pos of state.positions.values()){ maxX = Math.max(maxX, pos.x+TILE_W+200); maxY = Math.max(maxY, pos.y+300); }
+  svg.setAttribute('width', maxX);
+  svg.setAttribute('height', maxY);
+
+  for(const conn of buildConnectors()){
+    if(conn.type === 'partner'){
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', conn.x1); line.setAttribute('y1', conn.y1);
+      line.setAttribute('x2', conn.x2); line.setAttribute('y2', conn.y2);
+      line.setAttribute('stroke', conn.status === 'divorced' ? '#c69a7b' : '#a98a63');
+      line.setAttribute('stroke-width', '2');
+      if(conn.status === 'divorced') line.setAttribute('stroke-dasharray', '4,3');
+      svg.appendChild(line);
+
+      const btn = document.createElement('button');
+      btn.className = 'rel-add-btn';
+      btn.type = 'button';
+      btn.title = 'Add child of this relationship';
+      btn.textContent = '+';
+      btn.style.left = (conn.plus.x - 11) + 'px';
+      btn.style.top = (conn.plus.y - 11) + 'px';
+      btn.addEventListener('mousedown', e => e.stopPropagation());
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        openAddChildForRelationship(conn.relationshipId);
+      });
+      canvasContent.appendChild(btn);
+    } else {
+      for(const d of conn.paths){
+        const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+        path.setAttribute('d', d);
+        path.setAttribute('fill','none'); path.setAttribute('stroke','#bdb093'); path.setAttribute('stroke-width','1.5');
+        svg.appendChild(path);
+      }
+    }
   }
 }
 
@@ -1791,7 +1802,8 @@ function init(){
     slugify, generateId, computeMirrors, rebuildIndexFromPeople, computeSiblings,
     resolveSpouseOrder, computeGenerations, computeLayout, buildFamilyUnits,
     orderClusterMembers, emptyIndex,
-    state, Storage, renderAll, createPerson, addParentChild, addSpousePair,
+    state, Storage, renderAll, renderConnectors, buildConnectors,
+    createPerson, addParentChild, addSpousePair,
     childrenOf, deletePerson,
     sampleFamilyData, handleTryDemo,
     loadSample: loadInMemory,

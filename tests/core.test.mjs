@@ -343,4 +343,47 @@ T.state.index = savedIndex2;
 T.state.people = savedPeople2;
 T.state.selectedId = savedSelected;
 
+// ---- unified connectors: one concept, partner connectors carry a plus,
+// parent-child connectors never do ----
+const connIdx = T.emptyIndex();
+connIdx.spousePairs.push({ id:'pair-ab', a:'a', b:'b', status:'married', start_date:null, start_date_precision:'unknown', end_date:null, end_date_precision:null, order_a:null, order_b:null });
+connIdx.parentChild.push({ parent:'a', child:'kid1', type:'biological', relationship_id:'pair-ab' });
+connIdx.parentChild.push({ parent:'b', child:'kid1', type:'biological', relationship_id:'pair-ab' });
+connIdx.parentChild.push({ parent:'a', child:'solo', type:'biological', relationship_id:null });
+
+const connPeople = new Map();
+for(const id of ['a','b','kid1','solo']) connPeople.set(id, { filename:id+'.md', frontmatter:{ id, name:id }, body:'' });
+const connPositions = new Map([
+  ['a', {x:0,y:0}], ['b', {x:204,y:0}], ['kid1', {x:0,y:220}], ['solo', {x:204,y:220}],
+]);
+
+const savedIndex3 = T.state.index, savedPeople3 = T.state.people, savedPositions3 = T.state.positions;
+T.state.index = connIdx;
+T.state.people = connPeople;
+T.state.positions = connPositions;
+
+const connectors = T.buildConnectors();
+const partnerConns = connectors.filter(c => c.type === 'partner');
+const pcConns = connectors.filter(c => c.type === 'parent-child');
+
+assert.equal(partnerConns.length, 1);
+assert.equal(partnerConns[0].relationshipId, 'pair-ab');
+assert.ok(partnerConns[0].plus && typeof partnerConns[0].plus.x === 'number' && typeof partnerConns[0].plus.y === 'number');
+ok('buildConnectors: the partner connector carries a plus target for its relationship');
+
+assert.equal(pcConns.length, 2);
+const kid1Conn = pcConns.find(c => c.childId === 'kid1');
+const soloConn = pcConns.find(c => c.childId === 'solo');
+assert.equal(kid1Conn.plus, undefined);
+assert.equal(soloConn.plus, undefined);
+ok('buildConnectors: parent-child connectors never carry a plus — only partner connectors do');
+
+assert.equal(kid1Conn.paths.length, 3); // 2 parents fanning in + 1 drop to the child
+assert.equal(soloConn.paths.length, 2); // 1 parent fanning in + 1 drop to the child
+ok('buildConnectors: parent-child path count tracks the number of recorded parents');
+
+T.state.index = savedIndex3;
+T.state.people = savedPeople3;
+T.state.positions = savedPositions3;
+
 console.log(`\n${passed} checks passed.`);
