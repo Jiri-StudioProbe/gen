@@ -406,7 +406,7 @@ ok('buildConnectors: siblings sharing the same parents share one fan-in, no dupl
 // Reported bug: connector endpoints must land on a tile's edge (with a gap),
 // never at a point inside its bounding box.
 function pointInsideTile(x, y, pos){
-  return x > pos.x && x < pos.x + 170 && y > pos.y && y < pos.y + 187;
+  return x > pos.x && x < pos.x + T.TILE_W && y > pos.y && y < pos.y + T.TILE_H;
 }
 for(const conn of T.buildConnectors()){
   const coordPairs = conn.type === 'partner'

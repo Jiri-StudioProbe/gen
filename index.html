@@ -204,13 +204,17 @@ const CORE_FIELD_SET = new Set(PERSON_FIELD_ORDER);
 const SPOUSE_STATUSES = ["married","divorced","widowed","partnered"];
 const DATE_PRECISIONS = ["exact","approx","unknown"];
 const TILE_W = 170, TILE_GAP = 34, ROW_H = 220, CLUSTER_GAP = 46;
-// TILE_H is the tile's typical rendered height (photo + text; CSS content-
-// sized, so this is empirical, not exact) — used only to anchor connectors
-// to a tile's edge. ROW_H already assumes roughly this height for the gap
-// between generation rows to read cleanly; CONNECTOR_GAP is the visible
-// space a connector stops short of a card by, so lines never touch or run
-// behind one.
-const TILE_H = 187, CONNECTOR_GAP = 6;
+// TILE_H is the tile's typical rendered height (padding 20 + photo+margin 98
+// + one-line name ~17 + years ~16 ≈ 151px, confirmed against the live DOM
+// via getBoundingClientRect — CSS content-sized, so this is empirical, not
+// exact) — used only to anchor connectors to a tile's edge. A wrong value
+// here doesn't misplace tiles (layout uses ROW_H, not this), but does throw
+// off exactly where a connector stops short of one — which is what an
+// earlier, too-large guess (187) did: it placed the connector's parent-side
+// anchor 36px past the card's real bottom edge. CONNECTOR_GAP is the
+// visible space a connector stops short of a card by, so lines never touch
+// or run behind one.
+const TILE_H = 151, CONNECTOR_GAP = 6;
 
 /* =========================================================================
    YAML frontmatter parser / serializer (hand-written, tailored subset)
@@ -1089,17 +1093,23 @@ function buildConnectors(){
 
     const parentBottom = Math.max(...parentBoxes.map(b => b.bottom));
     const childTop = Math.min(...childBoxes.map(b => b.top));
-    const midY = parentBottom < childTop ? (parentBottom + childTop) / 2 : parentBottom + 10;
+    // Two levels, not one: parents converge close to their own row (trunkY)
+    // and children fan back out close to theirs (branchY), connected by one
+    // vertical run between. A single shared level made both ends stop
+    // partway through the gap instead of reaching near either row.
+    const trunkY = parentBottom < childTop ? parentBottom + (childTop - parentBottom) * 0.35 : parentBottom + 6;
+    const branchY = parentBottom < childTop ? parentBottom + (childTop - parentBottom) * 0.65 : parentBottom + 12;
     const trunkX = parentBoxes.reduce((s,b) => s + b.centerX, 0) / parentBoxes.length;
 
-    const paths = parentBoxes.map(b => `M ${b.centerX} ${b.bottom} L ${b.centerX} ${midY} L ${trunkX} ${midY}`);
+    const paths = parentBoxes.map(b => `M ${b.centerX} ${b.bottom} L ${b.centerX} ${trunkY} L ${trunkX} ${trunkY}`);
+    paths.push(`M ${trunkX} ${trunkY} L ${trunkX} ${branchY}`);
     // Bridge the trunk to whatever span the children actually land at —
     // they won't necessarily be centered exactly on trunkX (other
     // families' clusters can sit between them and the row's edge).
     const childXs = childBoxes.map(b => b.centerX);
     const spanMinX = Math.min(trunkX, ...childXs), spanMaxX = Math.max(trunkX, ...childXs);
-    if(spanMaxX > spanMinX) paths.push(`M ${spanMinX} ${midY} L ${spanMaxX} ${midY}`);
-    for(const b of childBoxes) paths.push(`M ${b.centerX} ${midY} L ${b.centerX} ${b.top}`);
+    if(spanMaxX > spanMinX) paths.push(`M ${spanMinX} ${branchY} L ${spanMaxX} ${branchY}`);
+    for(const b of childBoxes) paths.push(`M ${b.centerX} ${branchY} L ${b.centerX} ${b.top}`);
 
     connectors.push({ type: 'parent-child', unitId: unit.id, paths });
   }
@@ -1826,6 +1836,7 @@ function init(){
     resolveSpouseOrder, computeGenerations, computeLayout, buildFamilyUnits,
     orderClusterMembers, emptyIndex,
     state, Storage, renderAll, renderConnectors, buildConnectors,
+    TILE_W, TILE_H, CONNECTOR_GAP,
     createPerson, addParentChild, addSpousePair,
     childrenOf, deletePerson,
     sampleFamilyData, handleTryDemo,
