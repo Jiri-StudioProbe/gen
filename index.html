@@ -204,6 +204,13 @@ const CORE_FIELD_SET = new Set(PERSON_FIELD_ORDER);
 const SPOUSE_STATUSES = ["married","divorced","widowed","partnered"];
 const DATE_PRECISIONS = ["exact","approx","unknown"];
 const TILE_W = 170, TILE_GAP = 34, ROW_H = 220, CLUSTER_GAP = 46;
+// TILE_H is the tile's typical rendered height (photo + text; CSS content-
+// sized, so this is empirical, not exact) — used only to anchor connectors
+// to a tile's edge. ROW_H already assumes roughly this height for the gap
+// between generation rows to read cleanly; CONNECTOR_GAP is the visible
+// space a connector stops short of a card by, so lines never touch or run
+// behind one.
+const TILE_H = 187, CONNECTOR_GAP = 6;
 
 /* =========================================================================
    YAML frontmatter parser / serializer (hand-written, tailored subset)
@@ -1024,21 +1031,30 @@ function escapeHtml(s){
 
 // Builds the canvas's connectors as one list, one entry per relationship —
 // either a 'partner' connector (a spousePairs entry) or a 'parent-child'
-// connector (one child's fan-in from its recorded parents). It's a single
-// concept end to end: the only thing that sets a partner connector apart
-// is that it also carries a spot for the '+' that adds a child of that
-// relationship — not a separate subsystem, just a field on the same record.
+// connector (one family unit's fan-in from its parent(s) to its children).
+// It's a single concept end to end: the only thing that sets a partner
+// connector apart is that it also carries a spot for the '+' that adds a
+// child of that relationship — not a separate subsystem, just a field on
+// the same record. Every endpoint anchors to a tile's actual edge (with
+// CONNECTOR_GAP of clearance), never a point inside it, so a connector
+// never runs behind or touches a card.
 function buildConnectors(){
-  const center = id => {
+  const boxOf = id => {
     const pos = state.positions.get(id);
     if(!pos) return null;
-    return { x: pos.x + TILE_W/2, y: pos.y + 100 };
+    return {
+      left: pos.x - CONNECTOR_GAP, right: pos.x + TILE_W + CONNECTOR_GAP,
+      top: pos.y - CONNECTOR_GAP, bottom: pos.y + TILE_H + CONNECTOR_GAP,
+      centerX: pos.x + TILE_W/2, centerY: pos.y + TILE_H/2,
+    };
   };
   const connectors = [];
 
   // One connector per relationship, not per person-pair: two people can
   // have more than one relationship on record (divorce then remarriage),
-  // and each needs its own line and its own + control. Duplicates between
+  // and each needs its own line and its own + control. Anchored to
+  // whichever edge of each tile actually faces the other — so the line
+  // only ever occupies the gap between the two cards. Duplicates between
   // the same two people are offset vertically so they don't sit exactly
   // on top of each other.
   const pairGroups = new Map();
@@ -1050,35 +1066,42 @@ function buildConnectors(){
   }
   for(const [, group] of pairGroups){
     group.forEach((sp, i)=>{
-      const ca = center(sp.a), cb = center(sp.b);
-      const yOffset = i * 16;
-      const y1 = ca.y - 55 - yOffset, y2 = cb.y - 55 - yOffset;
+      const boxA = boxOf(sp.a), boxB = boxOf(sp.b);
+      const [nearer, farther] = boxA.centerX <= boxB.centerX ? [boxA, boxB] : [boxB, boxA];
+      const yOffset = i * 20;
+      const y1 = nearer.centerY - yOffset, y2 = farther.centerY - yOffset;
       connectors.push({
         type: 'partner', relationshipId: sp.id, status: sp.status,
-        x1: ca.x, y1, x2: cb.x, y2,
-        plus: { x: (ca.x+cb.x)/2, y: (y1+y2)/2 },
+        x1: nearer.right, y1, x2: farther.left, y2,
+        plus: { x: (nearer.right + farther.left) / 2, y: (y1 + y2) / 2 },
       });
     });
   }
 
-  // One connector per child, fanning in from each of their recorded
-  // parents to a shared drop point above the child.
-  const byChild = new Map();
-  for(const pc of state.index.parentChild){
-    if(!byChild.has(pc.child)) byChild.set(pc.child, []);
-    byChild.get(pc.child).push(pc.parent);
-  }
-  for(const [child, parents] of byChild){
-    if(!state.positions.has(child)) continue;
-    const validParents = parents.filter(p=>state.positions.has(p));
-    if(!validParents.length) continue;
-    const cc = center(child);
-    const parentPts = validParents.map(center);
-    const midX = parentPts.reduce((s,p)=>s+p.x,0)/parentPts.length;
-    const midY = parentPts[0].y - 55;
-    const paths = parentPts.map(pp => `M ${pp.x} ${pp.y-55} L ${pp.x} ${midY+30} L ${midX} ${midY+30}`);
-    paths.push(`M ${midX} ${midY+30} L ${midX} ${cc.y-100} L ${cc.x} ${cc.y-100}`);
-    connectors.push({ type: 'parent-child', childId: child, paths });
+  // One connector per family unit (buildFamilyUnits groups children by the
+  // relationship that produced them), not one per child — siblings sharing
+  // the same parents share a single fan-in from those parents instead of
+  // each redrawing an identical, exactly-overlapping copy of it.
+  for(const unit of buildFamilyUnits(state.index)){
+    const parentBoxes = unit.parents.map(boxOf).filter(Boolean);
+    const childBoxes = unit.children.map(id => boxOf(id)).filter(Boolean);
+    if(!parentBoxes.length || !childBoxes.length) continue;
+
+    const parentBottom = Math.max(...parentBoxes.map(b => b.bottom));
+    const childTop = Math.min(...childBoxes.map(b => b.top));
+    const midY = parentBottom < childTop ? (parentBottom + childTop) / 2 : parentBottom + 10;
+    const trunkX = parentBoxes.reduce((s,b) => s + b.centerX, 0) / parentBoxes.length;
+
+    const paths = parentBoxes.map(b => `M ${b.centerX} ${b.bottom} L ${b.centerX} ${midY} L ${trunkX} ${midY}`);
+    // Bridge the trunk to whatever span the children actually land at —
+    // they won't necessarily be centered exactly on trunkX (other
+    // families' clusters can sit between them and the row's edge).
+    const childXs = childBoxes.map(b => b.centerX);
+    const spanMinX = Math.min(trunkX, ...childXs), spanMaxX = Math.max(trunkX, ...childXs);
+    if(spanMaxX > spanMinX) paths.push(`M ${spanMinX} ${midY} L ${spanMaxX} ${midY}`);
+    for(const b of childBoxes) paths.push(`M ${b.centerX} ${midY} L ${b.centerX} ${b.top}`);
+
+    connectors.push({ type: 'parent-child', unitId: unit.id, paths });
   }
 
   return connectors;

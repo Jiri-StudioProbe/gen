@@ -371,16 +371,58 @@ assert.equal(partnerConns[0].relationshipId, 'pair-ab');
 assert.ok(partnerConns[0].plus && typeof partnerConns[0].plus.x === 'number' && typeof partnerConns[0].plus.y === 'number');
 ok('buildConnectors: the partner connector carries a plus target for its relationship');
 
+// Connectors are per family unit now (see buildFamilyUnits), not per
+// child, so kid1's unit key is 'rel:pair-ab' and solo's is 'solo:a'.
 assert.equal(pcConns.length, 2);
-const kid1Conn = pcConns.find(c => c.childId === 'kid1');
-const soloConn = pcConns.find(c => c.childId === 'solo');
+const kid1Conn = pcConns.find(c => c.unitId === 'rel:pair-ab');
+const soloConn = pcConns.find(c => c.unitId === 'solo:a');
+assert.ok(kid1Conn && soloConn);
 assert.equal(kid1Conn.plus, undefined);
 assert.equal(soloConn.plus, undefined);
 ok('buildConnectors: parent-child connectors never carry a plus — only partner connectors do');
 
-assert.equal(kid1Conn.paths.length, 3); // 2 parents fanning in + 1 drop to the child
-assert.equal(soloConn.paths.length, 2); // 1 parent fanning in + 1 drop to the child
-ok('buildConnectors: parent-child path count tracks the number of recorded parents');
+// Reported bug: two siblings sharing the same two parents must share ONE
+// fan-in, not draw an exact duplicate per extra sibling.
+const dupIdx = T.emptyIndex();
+dupIdx.spousePairs.push({ id:'rel-parents', a:'pa', b:'pb', status:'married', start_date:null, start_date_precision:'unknown', end_date:null, end_date_precision:null, order_a:null, order_b:null });
+dupIdx.parentChild.push({ parent:'pa', child:'sib1', type:'biological', relationship_id:'rel-parents' });
+dupIdx.parentChild.push({ parent:'pb', child:'sib1', type:'biological', relationship_id:'rel-parents' });
+dupIdx.parentChild.push({ parent:'pa', child:'sib2', type:'biological', relationship_id:'rel-parents' });
+dupIdx.parentChild.push({ parent:'pb', child:'sib2', type:'biological', relationship_id:'rel-parents' });
+const dupPeople = new Map();
+for(const id of ['pa','pb','sib1','sib2']) dupPeople.set(id, { filename:id+'.md', frontmatter:{ id, name:id }, body:'' });
+const dupPositions = new Map([
+  ['pa', {x:0,y:0}], ['pb', {x:204,y:0}], ['sib1', {x:0,y:220}], ['sib2', {x:204,y:220}],
+]);
+T.state.index = dupIdx; T.state.people = dupPeople; T.state.positions = dupPositions;
+const dupConnectors = T.buildConnectors().filter(c => c.type === 'parent-child');
+assert.equal(dupConnectors.length, 1, 'siblings sharing the same parents must be ONE family-unit connector, not one per sibling');
+const dupPaths = dupConnectors[0].paths;
+const uniquePaths = new Set(dupPaths);
+assert.equal(dupPaths.length, uniquePaths.size, `no exact-duplicate path strings, got: ${JSON.stringify(dupPaths)}`);
+assert.equal(dupPaths.filter(d => d.split(' L ').length === 3).length, 2, 'exactly 2 fan-in segments (one per parent), not one per sibling');
+ok('buildConnectors: siblings sharing the same parents share one fan-in, no duplicate overlapping lines');
+
+// Reported bug: connector endpoints must land on a tile's edge (with a gap),
+// never at a point inside its bounding box.
+function pointInsideTile(x, y, pos){
+  return x > pos.x && x < pos.x + 170 && y > pos.y && y < pos.y + 187;
+}
+for(const conn of T.buildConnectors()){
+  const coordPairs = conn.type === 'partner'
+    ? [[conn.x1, conn.y1], [conn.x2, conn.y2]]
+    : conn.paths.flatMap(d => {
+        const n = d.match(/-?\d+(\.\d+)?/g).map(Number);
+        const pts = []; for(let i=0;i<n.length;i+=2) pts.push([n[i], n[i+1]]);
+        return pts;
+      });
+  for(const [x,y] of coordPairs){
+    for(const [, pos] of dupPositions){
+      assert.ok(!pointInsideTile(x, y, pos), `connector point (${x},${y}) falls inside a tile at (${pos.x},${pos.y})`);
+    }
+  }
+}
+ok('buildConnectors: no connector point falls inside a tile\'s bounding box');
 
 T.state.index = savedIndex3;
 T.state.people = savedPeople3;
