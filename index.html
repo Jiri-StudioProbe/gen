@@ -5,104 +5,131 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Family Tree</title>
 <style>
+  /* Design language: Japanese restraint (generous negative space, one
+     considered accent, nothing decorative) crossed with Swiss/Bauhaus
+     functionalism (a visible grid, flat hairline-bordered geometry, sharp
+     corners, type carrying hierarchy instead of shadows or color-coding).
+     One accent hue total; everything else is ink, paper, and gray. */
   :root{
-    --bg:#f4f2ee; --panel:#fff; --border:#ddd6c9; --ink:#2b2620; --muted:#8a8276;
-    --accent:#8a5a3b; --accent-ink:#fff; --tile-bg:#fff; --tile-border:#d8cfc0;
-    --danger:#b64b3c; --shadow:0 2px 8px rgba(40,32,20,.08);
-    --row-h:220px; --tile-w:170px;
+    --bg:#f7f6f2; --panel:#fff; --border:#dedad2; --ink:#17140f; --muted:#79756c;
+    --accent:#b3392a; --accent-ink:#fff; --tile-bg:#fff; --tile-border:#dad5c9;
+    --danger:#b3392a; --line:#4a463d; --line-muted:#a9a396;
+    --radius:2px; --row-h:220px; --tile-w:170px;
   }
   *{box-sizing:border-box;}
   html,body{height:100%;margin:0;}
   body{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
     color:var(--ink); background:var(--bg); overflow:hidden;
   }
   #app{display:flex; flex-direction:column; height:100vh;}
 
   /* ---- Header ---- */
   header{
-    display:flex; align-items:center; gap:12px; padding:10px 16px;
+    display:flex; align-items:center; gap:16px; padding:14px 20px;
     background:var(--panel); border-bottom:1px solid var(--border); z-index:20;
   }
-  header h1{font-size:16px; margin:0; font-weight:600; letter-spacing:.2px;}
+  header h1{
+    font-size:13px; margin:0; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+  }
   header .spacer{flex:1;}
-  header .vault-name{font-size:13px; color:var(--muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  header .status{font-size:12px; color:var(--muted); min-width:70px; text-align:right;}
+  header .vault-name{font-size:12.5px; color:var(--muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  header .status{font-size:11.5px; color:var(--muted); min-width:70px; text-align:right;}
   button{
     font:inherit; cursor:pointer; border:1px solid var(--border); background:var(--panel);
-    color:var(--ink); border-radius:6px; padding:7px 12px; font-size:13px;
+    color:var(--ink); border-radius:var(--radius); padding:8px 14px; font-size:12.5px;
+    letter-spacing:.2px;
   }
-  button:hover{background:#efe9df;}
+  button:hover{border-color:var(--ink);}
   button.primary{background:var(--accent); color:var(--accent-ink); border-color:var(--accent);}
-  button.primary:hover{filter:brightness(1.08);}
+  button.primary:hover{background:#992f22; border-color:#992f22;}
   button.danger{color:var(--danger); border-color:var(--danger);}
-  button:disabled{opacity:.45; cursor:not-allowed;}
+  button.danger:hover{background:var(--danger); color:#fff;}
+  button:disabled{opacity:.4; cursor:not-allowed;}
   button.icon{padding:6px 9px;}
 
   /* ---- Welcome screen ---- */
   #welcome{
-    flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:16px;
+    flex:1; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:20px;
     text-align:center; padding:40px;
   }
-  #welcome h2{font-size:22px; margin:0;}
-  #welcome p{color:var(--muted); max-width:440px; line-height:1.5; margin:0;}
+  #welcome h2{font-size:20px; margin:0; font-weight:700; letter-spacing:.2px;}
+  #welcome p{color:var(--muted); max-width:440px; line-height:1.6; margin:0; font-size:13.5px;}
   #welcome .unsupported{color:var(--danger); font-weight:600;}
   #welcome button + button{margin-left:8px;}
 
   #demo-banner{
-    display:flex; align-items:center; justify-content:center; gap:12px;
-    background:#f4e3c8; color:#6b4a1f; font-size:13px; padding:7px 16px;
-    border-bottom:1px solid #e0c493;
+    display:flex; align-items:center; justify-content:center; gap:14px;
+    background:var(--panel); color:var(--ink); font-size:12.5px; padding:8px 16px;
+    border-bottom:1px solid var(--border);
   }
-  #demo-banner button{padding:3px 9px; font-size:12px;}
+  #demo-banner::before{
+    content:''; width:6px; height:6px; border-radius:50%; background:var(--accent); flex-shrink:0;
+  }
+  #demo-banner button{padding:3px 10px; font-size:11.5px;}
 
   /* ---- Main layout ---- */
   main{flex:1; position:relative; display:flex; overflow:hidden;}
   #canvas-viewport{
     flex:1; position:relative; overflow:hidden; background:
-      radial-gradient(circle, #e2dcce 1px, transparent 1px) 0 0/22px 22px, var(--bg);
+      linear-gradient(var(--border) 1px, transparent 1px) 0 0/24px 24px,
+      linear-gradient(90deg, var(--border) 1px, transparent 1px) 0 0/24px 24px,
+      var(--bg);
     cursor:grab; touch-action:none;
   }
   #canvas-viewport.panning{cursor:grabbing;}
   #canvas-content{position:absolute; top:0; left:0; transform-origin:0 0; will-change:transform;}
   svg#connectors{position:absolute; top:0; left:0; overflow:visible; pointer-events:none;}
   .person-tile{
-    position:absolute; width:var(--tile-w); background:var(--tile-bg); border:1.5px solid var(--tile-border);
-    border-radius:10px; box-shadow:var(--shadow); padding:10px; cursor:pointer; user-select:none;
-    touch-action:none; transition:box-shadow .12s, border-color .12s;
+    position:absolute; width:var(--tile-w); background:var(--tile-bg); border:1px solid var(--tile-border);
+    border-radius:var(--radius); padding:10px; cursor:pointer; user-select:none;
+    touch-action:none; transition:border-color .12s;
   }
-  .person-tile:hover{border-color:var(--accent); box-shadow:0 4px 14px rgba(40,32,20,.14);}
-  .person-tile.dragging{opacity:.85; z-index:50; cursor:grabbing;}
+  .person-tile:hover{border-color:var(--ink);}
+  .person-tile.dragging{opacity:.85; z-index:50; cursor:grabbing; border-color:var(--accent);}
   .person-tile .photo{
-    width:100%; height:90px; border-radius:7px; background:#eee2d2 center/cover no-repeat;
-    display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:24px; margin-bottom:8px;
+    width:100%; height:90px; background:var(--tile-border) center/cover no-repeat;
+    margin-bottom:8px; position:relative; overflow:hidden;
   }
-  .person-tile .name{font-size:13.5px; font-weight:600; line-height:1.25; word-break:break-word;}
-  .person-tile .years{font-size:11.5px; color:var(--muted); margin-top:2px;}
+  /* Flat two-shape pictogram (head + shoulders) standing in for a photo —
+     abstract and monochrome rather than an illustrative/emoji icon. */
+  .avatar-placeholder::before{
+    content:''; position:absolute; left:50%; top:34%; width:22%; aspect-ratio:1;
+    border-radius:50%; background:var(--muted); transform:translate(-50%,-50%);
+  }
+  .avatar-placeholder::after{
+    content:''; position:absolute; left:50%; bottom:-10%; width:56%; height:38%;
+    border-radius:50% 50% 0 0; background:var(--muted); transform:translateX(-50%);
+  }
+  .person-tile .name{font-size:13.5px; font-weight:600; line-height:1.3; word-break:break-word; letter-spacing:.1px;}
+  .person-tile .years{font-size:11px; color:var(--muted); margin-top:2px; letter-spacing:.2px;}
   .person-tile .badge{
-    display:inline-block; font-size:10px; margin-top:5px; padding:1px 6px; border-radius:10px;
-    background:#efe6d6; color:var(--accent);
+    display:block; font-size:9.5px; margin-top:5px; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.6px; font-weight:600;
   }
 
   .rel-add-btn{
-    position:absolute; width:22px; height:22px; padding:0; border-radius:50%;
+    position:absolute; width:20px; height:20px; padding:0; border-radius:50%;
     background:var(--accent); color:#fff; border:2px solid var(--bg);
-    font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center;
-    cursor:pointer; box-shadow:0 1px 4px rgba(0,0,0,.25); z-index:5;
+    font-size:13px; line-height:1; display:flex; align-items:center; justify-content:center;
+    cursor:pointer; z-index:5;
   }
-  .rel-add-btn:hover{ filter:brightness(1.1); transform:scale(1.08); }
+  .rel-add-btn:hover{ background:#992f22; }
 
-  #zoom-controls{position:absolute; right:14px; bottom:14px; display:flex; flex-direction:column; gap:6px; z-index:15;}
-  #zoom-controls button{width:34px; height:34px; padding:0; font-size:16px;}
+  #zoom-controls{position:absolute; right:14px; bottom:14px; display:flex; flex-direction:column; gap:1px; z-index:15;}
+  #zoom-controls button{width:32px; height:32px; padding:0; font-size:15px;}
 
   /* ---- Add menu popover ---- */
   #add-menu{
-    position:absolute; z-index:60; background:var(--panel); border:1px solid var(--border);
-    border-radius:8px; box-shadow:var(--shadow); min-width:190px; padding:6px; display:none;
+    position:absolute; z-index:60; background:var(--panel); border:1px solid var(--ink);
+    border-radius:var(--radius); min-width:190px; padding:4px; display:none;
   }
-  #add-menu button{display:block; width:100%; text-align:left; border:none; background:none; padding:8px 10px; border-radius:6px;}
-  #add-menu button:hover{background:#efe9df;}
-  #add-menu .sep{height:1px; background:var(--border); margin:5px 2px;}
+  #add-menu button{
+    display:block; width:100%; text-align:left; border:none; background:none;
+    padding:9px 10px; border-radius:0; font-size:12.5px;
+  }
+  #add-menu button:hover{background:var(--bg);}
+  #add-menu .sep{height:1px; background:var(--border); margin:4px 2px;}
 
   /* ---- Detail panel ---- */
   #detail-panel{
@@ -110,26 +137,29 @@
     overflow-y:auto; display:flex; flex-direction:column; flex-shrink:0;
   }
   #detail-panel[hidden]{display:none;}
-  .detail-head{display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--border);}
-  .detail-head h2{font-size:16px; margin:0; flex:1;}
-  .detail-body{padding:14px 16px; display:flex; flex-direction:column; gap:14px;}
-  .field{display:flex; flex-direction:column; gap:4px;}
-  .field label{font-size:11.5px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); font-weight:600;}
+  .detail-head{display:flex; align-items:center; gap:10px; padding:16px 20px; border-bottom:1px solid var(--border);}
+  .detail-head h2{font-size:15px; margin:0; flex:1; font-weight:700; letter-spacing:.1px;}
+  .detail-body{padding:20px; display:flex; flex-direction:column; gap:16px;}
+  .field{display:flex; flex-direction:column; gap:5px;}
+  .field label{font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); font-weight:600;}
   .field input[type=text], .field input[type=date], .field select, .field textarea{
-    font:inherit; padding:7px 9px; border:1px solid var(--border); border-radius:6px; background:#fffdfa;
+    font:inherit; padding:8px 9px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{
+    outline:none; border-color:var(--ink);
   }
   .field textarea{resize:vertical; min-height:110px; font-family:inherit;}
-  .row2{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
-  fieldset{border:1px solid var(--border); border-radius:8px; padding:10px; margin:0;}
-  legend{font-size:12px; font-weight:600; color:var(--muted); padding:0 4px;}
-  .rel-list{display:flex; flex-direction:column; gap:6px;}
-  .rel-item{display:flex; align-items:center; gap:8px; font-size:13px; padding:6px 8px; background:#faf7f1; border-radius:6px;}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  fieldset{border:1px solid var(--border); border-radius:var(--radius); padding:12px; margin:0;}
+  legend{font-size:10.5px; font-weight:600; color:var(--muted); padding:0 4px; text-transform:uppercase; letter-spacing:.6px;}
+  .rel-list{display:flex; flex-direction:column; gap:1px;}
+  .rel-item{display:flex; align-items:center; gap:8px; font-size:13px; padding:7px 8px; border-bottom:1px solid var(--border);}
   .rel-item .name{flex:1; cursor:pointer;}
   .rel-item .name:hover{text-decoration:underline;}
-  .rel-item .tag{font-size:10.5px; color:var(--muted);}
-  .spouse-card{border:1px solid var(--border); border-radius:8px; padding:8px; display:flex; flex-direction:column; gap:6px;}
-  .photo-upload{display:flex; align-items:center; gap:10px;}
-  .photo-upload .preview{width:64px; height:64px; border-radius:8px; background:#eee2d2 center/cover no-repeat; flex-shrink:0;}
+  .rel-item .tag{font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px;}
+  .spouse-card{border:1px solid var(--border); border-radius:var(--radius); padding:10px; display:flex; flex-direction:column; gap:8px;}
+  .photo-upload{display:flex; align-items:center; gap:12px;}
+  .photo-upload .preview{width:64px; height:64px; background:var(--tile-border) center/cover no-repeat; flex-shrink:0; position:relative; overflow:hidden;}
   .extra-fields{display:flex; flex-direction:column; gap:6px;}
   .extra-field-row{display:flex; gap:6px;}
   .extra-field-row input{flex:1;}
@@ -138,22 +168,22 @@
 
   /* ---- Modal ---- */
   .modal-backdrop{
-    position:fixed; inset:0; background:rgba(30,25,18,.4); display:flex; align-items:center; justify-content:center; z-index:100;
+    position:fixed; inset:0; background:rgba(23,20,15,.5); display:flex; align-items:center; justify-content:center; z-index:100;
   }
-  .modal{background:var(--panel); border-radius:10px; padding:18px; width:420px; max-width:92vw; box-shadow:0 12px 40px rgba(0,0,0,.25); display:flex; flex-direction:column; gap:12px;}
-  .modal h3{margin:0; font-size:15px;}
+  .modal{background:var(--panel); border-radius:var(--radius); padding:20px; width:420px; max-width:92vw; border:1px solid var(--ink); display:flex; flex-direction:column; gap:14px;}
+  .modal h3{margin:0; font-size:14px; font-weight:700; letter-spacing:.1px;}
   .modal .actions{display:flex; justify-content:flex-end; gap:8px; margin-top:4px;}
 
   /* ---- Crop modal ---- */
-  .crop-stage{position:relative; width:340px; height:260px; overflow:hidden; border-radius:8px; background:#111; margin:0 auto; touch-action:none;}
+  .crop-stage{position:relative; width:340px; height:260px; overflow:hidden; background:var(--ink); margin:0 auto; touch-action:none;}
   .crop-stage img{position:absolute; top:0; left:0; user-select:none; -webkit-user-drag:none; cursor:grab; touch-action:none;}
-  .crop-frame{position:absolute; border:2px solid #fff; box-shadow:0 0 0 2000px rgba(0,0,0,.45); pointer-events:none;}
+  .crop-frame{position:absolute; border:2px solid #fff; box-shadow:0 0 0 2000px rgba(0,0,0,.5); pointer-events:none;}
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <h1>🌳 Family Tree</h1>
+    <h1>Family Tree</h1>
     <span class="vault-name" id="vault-name"></span>
     <div class="spacer"></div>
     <span class="status" id="status-text"></span>
@@ -1018,10 +1048,10 @@ function renderTiles(){
     const photoUrl = state.photoUrls.get(id);
     const years = personLabel(person);
     tile.innerHTML = `
-      <div class="photo" style="${photoUrl ? `background-image:url('${photoUrl}')` : ''}">${photoUrl ? '' : '👤'}</div>
+      <div class="photo${photoUrl ? '' : ' avatar-placeholder'}" style="${photoUrl ? `background-image:url('${photoUrl}')` : ''}"></div>
       <div class="name">${escapeHtml(person.frontmatter.name || '(unnamed)')}</div>
       <div class="years">${years}</div>
-      ${person.frontmatter.dod ? '<span class="badge">deceased</span>' : ''}
+      ${person.frontmatter.dod ? '<span class="badge">Deceased</span>' : ''}
     `;
     tile.addEventListener('pointerdown', onTilePointerDown);
     tile.addEventListener('click', onTileClick);
@@ -1133,7 +1163,7 @@ function renderConnectors(){
       const line = document.createElementNS('http://www.w3.org/2000/svg','line');
       line.setAttribute('x1', conn.x1); line.setAttribute('y1', conn.y1);
       line.setAttribute('x2', conn.x2); line.setAttribute('y2', conn.y2);
-      line.setAttribute('stroke', conn.status === 'divorced' ? '#c69a7b' : '#a98a63');
+      line.setAttribute('stroke', conn.status === 'divorced' ? '#a9a396' : '#4a463d');
       line.setAttribute('stroke-width', '2');
       if(conn.status === 'divorced') line.setAttribute('stroke-dasharray', '4,3');
       svg.appendChild(line);
@@ -1155,7 +1185,7 @@ function renderConnectors(){
       for(const d of conn.paths){
         const path = document.createElementNS('http://www.w3.org/2000/svg','path');
         path.setAttribute('d', d);
-        path.setAttribute('fill','none'); path.setAttribute('stroke','#bdb093'); path.setAttribute('stroke-width','1.5');
+        path.setAttribute('fill','none'); path.setAttribute('stroke','#a9a396'); path.setAttribute('stroke-width','1.5');
         svg.appendChild(path);
       }
     }
@@ -1304,11 +1334,11 @@ function openAddMenu(personId, tileEl){
   menu.style.top = (tRect.top - vRect.top) + 'px';
   const person = state.people.get(personId);
   menu.innerHTML = `
-    <button data-action="child">➕ Add child</button>
-    <button data-action="partner">💍 Add partner</button>
-    <button data-action="parent">⬆️ Add parent</button>
+    <button data-action="child">Add child</button>
+    <button data-action="partner">Add partner</button>
+    <button data-action="parent">Add parent</button>
     <div class="sep"></div>
-    <button data-action="detail">📄 View / edit details</button>
+    <button data-action="detail">View / edit details</button>
   `;
   menu.querySelectorAll('button').forEach(btn=>{
     btn.addEventListener('click', ()=>{
@@ -1579,7 +1609,7 @@ function renderDetailPanel(){
     </div>
     <div class="detail-body">
       <div class="photo-upload">
-        <div class="preview" style="${photoUrl ? `background-image:url('${photoUrl}')` : ''}"></div>
+        <div class="preview${photoUrl ? '' : ' avatar-placeholder'}" style="${photoUrl ? `background-image:url('${photoUrl}')` : ''}"></div>
         <input type="file" id="d-photo-input" accept="image/*">
       </div>
 

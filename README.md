@@ -115,6 +115,17 @@ YourFolder/
   still be recoverable from your OS's own trash/file history, since the
   app just asks the browser to delete the file normally).
 
+## Design
+
+Flat, hairline-bordered, sharp-cornered — Japanese restraint (negative
+space, one considered accent color) crossed with Swiss/Bauhaus
+functionalism (a visible grid, type carrying hierarchy instead of shadows
+or color-coded chips, geometric abstraction over illustrative icons). No
+emoji anywhere in the UI; a person with no photo gets a flat two-shape
+pictogram (circle + shoulders) instead. All of it lives in the CSS
+variables at the top of `index.html`'s `<style>` block if you want to
+retune it.
+
 ## v1 scope
 
 Single-user, desktop Chrome/Edge only, local folder storage. Multi-user
